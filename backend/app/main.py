@@ -5,7 +5,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.config import get_settings
 from app.db import engine
 
-app = FastAPI(title='Арена переговоров', version='0.1.0')
+app = FastAPI(
+    title='Арена переговоров', version='0.1.0',
+    description='Инфраструктурная заглушка: только healthcheck. Игровые API ещё не реализованы.',
+)
 
 
 @app.get('/health/live')

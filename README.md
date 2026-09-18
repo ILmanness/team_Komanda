@@ -2,6 +2,66 @@
 
 > MVP AI-симулятора переговоров. Демонстрация — **30 сентября 2026 года**.
 
+## Статус: инфраструктура и заглушки
+
+**Backend, frontend и AI пока не являются готовой игрой.**
+
+| Часть | Что уже работает | Что является заглушкой / отсутствует |
+|---|---|---|
+| БД | 9 таблиц, миграция, ограничения, очистка по сроку | Игровой контент не заполнен |
+| Backend | FastAPI, healthcheck, подключение к БД | Нет авторизации, игровых API и обработки ходов |
+| Frontend | React/Vite, страница проверки соединения | Нет игрового интерфейса; экран — техническая заглушка |
+| AI | Mock и базовый клиент внешнего API | Mock возвращает фиксированный текст; нет Evaluator, Context Builder и Game Engine |
+
+Каркасы добавлены для проверки запуска окружения. Для подготовки одной БД они не нужны:
+достаточно конфигурации инфраструктуры и миграции. YAML описывает контейнеры, но сам
+по себе не реализует приложения и не заменяет их зависимости или SQL-схему.
+Каркасы оставлены для команды, не удалены.
+Весь data design: [docs/data_architecture.md](docs/data_architecture.md).
+
+## Windows: Docker и данные на диске E
+
+Установка выполняется **на вашем компьютере**, а не командой Compose.
+Для новой установки скачайте [официальный установщик Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+в `E:\Installers\Docker Desktop Installer.exe`. Проверьте `wsl --version` и требования
+на странице Docker; при отсутствии WSL сначала настройте его по этой инструкции.
+
+Запустите PowerShell от администратора:
+
+```powershell
+Start-Process -FilePath 'E:\Installers\Docker Desktop Installer.exe' -Wait -ArgumentList @(
+  'install',
+  '--backend=wsl-2',
+  '--installation-dir=E:\Docker\Desktop',
+  '--wsl-default-data-root=E:\Docker\WSL'
+)
+```
+
+Это all-users установка: программа — `E:\Docker\Desktop`, диск данных Docker/WSL —
+`E:\Docker\WSL`. Флаги описаны в [документации Docker](https://docs.docker.com/desktop/setup/install/windows-install/#installer-flags).
+Запустите Docker Desktop, самостоятельно прочитайте и примите лицензию, если согласны.
+До запуска проекта проверьте в настройках расположение диска данных: оно должно быть на E:.
+Затем в новом терминале выполните `docker version` и `docker compose version`.
+
+Если Docker уже установлен, **не переустанавливайте и не удаляйте его данные вслепую**:
+сначала проверьте текущую конфигурацию и сделайте резервную копию.
+Пользовательские настройки Windows могут остаться на C:; установка на E: не означает
+полного отсутствия служебных файлов на системном диске.
+
+Исходники проекта также клонируйте на E:, например:
+
+```powershell
+New-Item -ItemType Directory -Force E:\Projects
+Set-Location E:\Projects
+git clone --branch ms/data_architecture_and_docker-18.09.2026 https://github.com/ILmanness/team_Komanda.git
+Set-Location team_Komanda
+```
+
+Named volumes `postgres_data` и `frontend_modules`, образы и слои контейнеров хранятся
+в диске данных Docker. Поэтому перенос только репозитория на E: недостаточен:
+размещение диска Docker нужно задать отдельно, как выше. Пути вида `/var/lib/docker`
+внутри Linux не показывают букву физического диска Windows.
+
 ## Быстрый запуск
 
 Нужны Git и Docker Engine с Compose v2 (либо Docker Desktop с Linux containers).
@@ -78,7 +138,7 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 
 ## Схема и миграции
 
-Описание: [docs/database_architecture.md](docs/database_architecture.md).
+Описание: [docs/data_architecture.md](docs/data_architecture.md).
 Точная начальная схема: [0001_initial.sql](backend/migrations/versions/0001_initial.sql).
 
 - Все подготовленные задания — `missions`, карта строится по storyline_id/branch_key/order_index.
@@ -86,6 +146,16 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 - PAEI и сложность — отдельные справочники.
 - Custom не создаёт миссию: параметры хранятся в сессии.
 - Удаление сессии каскадно удаляет её сообщения.
+
+Если нужны только БД и таблицы без заглушек backend/frontend/AI:
+
+```bash
+docker compose up -d db
+docker compose run --rm migrate
+```
+
+Эти команды не запускают frontend, API и автоматическую очистку.
+Для автоматической очистки отдельно выполните `docker compose up -d cleanup`.
 
 ```bash
 docker compose run --rm migrate
