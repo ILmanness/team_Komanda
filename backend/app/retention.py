@@ -1,4 +1,3 @@
-"""Bounded cleanup, transactionally serialized with session row locks."""
 import argparse
 import json
 import logging

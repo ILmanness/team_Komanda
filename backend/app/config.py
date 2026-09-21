@@ -9,6 +9,9 @@ from sqlalchemy import URL
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
+    hesh_alg: str = 'HS256'
+    access_token_expire_minutes: int = 60
+    auth_secret_key: str
     postgres_host: str = 'localhost'
     postgres_port: int = 5432
     postgres_db: str = 'arena'

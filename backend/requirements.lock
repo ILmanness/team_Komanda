@@ -99,3 +99,17 @@ watchfiles==1.2.0
     # via uvicorn
 websockets==17.1
     # via uvicorn
+PyJWT==2.10.1
+    # via -r requirements.in
+pwdlib==0.2.1
+    # via -r requirements.in
+argon2-cffi==25.1.0
+    # via pwdlib
+argon2-cffi-bindings==25.1.0
+    # via argon2-cffi
+cffi==2.0.0
+    # via argon2-cffi-bindings
+pycparser==2.23
+    # via cffi
+email-validator==2.3.0
+    # via -r requirements.in

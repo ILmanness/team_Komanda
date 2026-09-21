@@ -1,6 +1,7 @@
 CREATE TABLE users (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     email varchar(320) UNIQUE,
+    password_hash varchar(128),
     display_name varchar(120) NOT NULL,
     role varchar(20) NOT NULL DEFAULT 'player' CHECK (role IN ('player', 'admin')),
     created_at timestamptz NOT NULL DEFAULT now(),
