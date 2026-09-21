@@ -1,13 +1,14 @@
 №№1. Общая архитектура проекта
 
 Главная идея: REST отвечает за управление ресурсами, WebSocket — за игровой процесс.
-                    FRONTEND
+
+                   FRONTEND
                        │
           ┌────────────┴────────────┐
           │                         │
           ▼                         ▼
      REST API                  WebSocket
-   HTTP Requests             Real-time Game
+     HTTP Requests             Real-time Game
           │                         │
           └────────────┬────────────┘
                        │
