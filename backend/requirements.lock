@@ -11,12 +11,22 @@ anyio==4.15.1
     #   httpx
     #   starlette
     #   watchfiles
+argon2-cffi==23.1.0
+    # via pwdlib
+argon2-cffi-bindings==25.1.0
+    # via argon2-cffi
 certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
+cffi==2.0.0
+    # via argon2-cffi-bindings
 click==8.5.0
     # via uvicorn
+dnspython==2.8.0
+    # via email-validator
+email-validator==2.3.0
+    # via -r requirements.in
 fastapi==0.141.1
     # via -r requirements.in
 greenlet==3.5.6
@@ -34,6 +44,7 @@ httpx==0.28.1
 idna==3.20
     # via
     #   anyio
+    #   email-validator
     #   httpx
 iniconfig==2.3.0
     # via pytest
@@ -49,6 +60,10 @@ psycopg==3.3.6
     # via -r requirements.in
 psycopg-binary==3.3.6
     # via psycopg
+pwdlib==0.2.1
+    # via -r requirements.in
+pycparser==2.23
+    # via cffi
 pydantic==2.13.5
     # via
     #   fastapi
@@ -59,6 +74,8 @@ pydantic-settings==2.15.0
     # via -r requirements.in
 pygments==2.21.0
     # via pytest
+pyjwt==2.10.1
+    # via -r requirements.in
 pytest==9.1.1
     # via -r requirements.in
 python-dotenv==1.2.3
