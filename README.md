@@ -1,307 +1,395 @@
 # Арена переговоров
 
-> MVP AI-симулятора переговоров. Демонстрация — **30 сентября 2026 года**.
+Окружение разработки MVP AI-симулятора переговоров. План демонстрации — 30 сентября 2026 года.
 
-## Статус: инфраструктура и заглушки
+## Что сейчас реализовано
 
-**Backend, frontend и AI пока не являются готовой игрой.**
+| Часть | Состояние |
+|---|---|
+| БД | 9 таблиц, миграции, ограничения, автоматическая очистка старых сессий |
+| Backend | FastAPI: регистрация, вход, текущий пользователь и каталог; обработка игровых ходов ещё не реализована |
+| Frontend | Заглушка React/Vite со статусом соединения; игрового интерфейса пока нет |
+| AI | Фиксированный mock-ответ и клиент внешнего API; Evaluator, Context Builder и Game Engine ещё не реализованы |
 
-| Часть | Что уже работает | Что является заглушкой / отсутствует |
-|---|---|---|
-| БД | 9 таблиц, миграция, ограничения, очистка по сроку | Игровой контент не заполнен |
-| Backend | FastAPI, healthcheck, подключение к БД | Нет авторизации, игровых API и обработки ходов |
-| Frontend | React/Vite, страница проверки соединения | Нет игрового интерфейса; экран — техническая заглушка |
-| AI | Mock и базовый клиент внешнего API | Mock возвращает фиксированный текст; нет Evaluator, Context Builder и Game Engine |
-
-Каркасы добавлены для проверки запуска окружения. Для подготовки одной БД они не нужны:
-достаточно конфигурации инфраструктуры и миграции. YAML описывает контейнеры, но сам
-по себе не реализует приложения и не заменяет их зависимости или SQL-схему.
-Каркасы оставлены для команды, не удалены.
+Пароль пользователя представлен полем **users.password_hash** (миграция 0002).
+В нём хранится хеш, не исходный пароль. Endpoint'ы авторизации доступны в Swagger.
 Весь data design: [docs/data_architecture.md](docs/data_architecture.md).
 
-## Windows: Docker и данные на диске E
+## 1. Проверить инструменты
 
-Установка выполняется **на вашем компьютере**, а не командой Compose.
-Для новой установки скачайте [официальный установщик Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
-в `E:\Installers\Docker Desktop Installer.exe`. Проверьте `wsl --version` и требования
-на странице Docker; при отсутствии WSL сначала настройте его по этой инструкции.
+Нужны Git, запущенный Docker и Compose v2. На Windows/macOS можно использовать Docker Desktop,
+на Linux — Docker Engine с Compose plugin. Проект использует Linux-контейнеры.
+Python, Node.js и PostgreSQL на компьютере устанавливать не нужно.
 
-Запустите PowerShell от администратора:
+Откройте PowerShell на Windows или терминал Linux/macOS:
 
-```powershell
-Start-Process -FilePath 'E:\Installers\Docker Desktop Installer.exe' -Wait -ArgumentList @(
-  'install',
-  '--backend=wsl-2',
-  '--installation-dir=E:\Docker\Desktop',
-  '--wsl-default-data-root=E:\Docker\WSL'
-)
-```
+~~~sh
+git --version
+docker version
+docker compose version
+~~~
 
-Это all-users установка: программа — `E:\Docker\Desktop`, диск данных Docker/WSL —
-`E:\Docker\WSL`. Флаги описаны в [документации Docker](https://docs.docker.com/desktop/setup/install/windows-install/#installer-flags).
-Запустите Docker Desktop, самостоятельно прочитайте и примите лицензию, если согласны.
-До запуска проекта проверьте в настройках расположение диска данных: оно должно быть на E:.
-Затем в новом терминале выполните `docker version` и `docker compose version`.
+У docker version должны быть разделы Client и Server. Если Server недоступен,
+запустите Docker и дождитесь его готовности.
 
-Если Docker уже установлен, **не переустанавливайте и не удаляйте его данные вслепую**:
-сначала проверьте текущую конфигурацию и сделайте резервную копию.
-Пользовательские настройки Windows могут остаться на C:; установка на E: не означает
-полного отсутствия служебных файлов на системном диске.
+## 2. Скачать проект
 
-Исходники проекта также клонируйте на E:, например:
+Если локальной копии нет:
 
-```powershell
-New-Item -ItemType Directory -Force E:\Projects
-Set-Location E:\Projects
-git clone --branch ms/data_architecture_and_docker-18.09.2026 https://github.com/ILmanness/team_Komanda.git
-Set-Location team_Komanda
-```
-
-Named volumes `postgres_data` и `frontend_modules`, образы и слои контейнеров хранятся
-в диске данных Docker. Поэтому перенос только репозитория на E: недостаточен:
-размещение диска Docker нужно задать отдельно, как выше. Пути вида `/var/lib/docker`
-внутри Linux не показывают букву физического диска Windows.
-
-## Быстрый запуск
-
-Нужны Git и Docker Engine с Compose v2 (либо Docker Desktop с Linux containers).
-Python, Node и PostgreSQL на компьютере устанавливать не нужно.
-
-```bash
-git clone --branch ms/data_architecture_and_docker-18.09.2026 https://github.com/ILmanness/team_Komanda.git
+~~~sh
+git clone --branch main https://github.com/ILmanness/team_Komanda.git
 cd team_Komanda
+~~~
+
+Если проект уже скачан, перейдите в его папку, выполните git status и сохраните свою
+незакоммиченную работу перед переключением ветки. Затем:
+
+~~~sh
+git fetch origin
+git switch main
+git pull --ff-only
+~~~
+
+**Все дальнейшие команды выполняются из корня проекта, где лежит compose.yaml.**
+Инструкция относится к объединённому main.
+
+## 3. Создать настройки
+
+Только если файла .env ещё нет, скопируйте пример. Существующий .env не перезаписывайте.
+
+В PowerShell:
+
+~~~powershell
+Copy-Item .env.example .env
+~~~
+
+В Linux/macOS/Git Bash:
+
+~~~sh
 cp .env.example .env
-# Замените POSTGRES_PASSWORD в .env перед первым запуском.
+~~~
+
+Откройте .env в редакторе. До первого запуска замените POSTGRES_PASSWORD своим паролем.
+Это пароль подключения к PostgreSQL, **не пароль игрового пользователя**.
+Остальные настройки для первого запуска можно оставить как в примере.
+
+Также замените AUTH_SECRET_KEY случайным секретом для подписи JWT. Если .env уже существовал,
+добавьте эту переменную: без неё backend и миграции не запустятся. Сгенерировать значение
+после создания .env можно командой ниже (скопируйте результат в AUTH_SECRET_KEY):
+
+~~~sh
+docker compose run --rm --build --no-deps migrate python -c "import secrets; print(secrets.token_hex(32))"
+~~~
+
+| Переменная | Значение / назначение |
+|---|---|
+| POSTGRES_DB | arena — имя базы |
+| POSTGRES_USER | arena — пользователь PostgreSQL |
+| POSTGRES_PASSWORD | Ваш пароль БД |
+| DB_PORT | 5432 — порт БД на компьютере |
+| BACKEND_PORT | 8000 — порт API |
+| FRONTEND_PORT | 5173 — порт интерфейса |
+| AI_PROVIDER | mock — запуск без ключей и запросов к платному API |
+| AUTH_SECRET_KEY | Собственный случайный секрет подписи JWT; не публиковать |
+
+.env исключён из Git. Не коммитьте пароли и API-ключи.
+Внутри контейнеров адрес БД автоматически задан как db:5432.
+
+## 4. Запустить окружение
+
+~~~sh
+docker compose config --quiet
 docker compose up --build -d
 docker compose ps -a
-```
+~~~
 
-В PowerShell вместо `cp` можно выполнить `Copy-Item .env.example .env`.
-Первый запуск скачивает образы и зависимости и требует доступа к их реестрам.
-Дождитесь healthy у db, backend и frontend. У migrate нормальный статус — Exited (0).
+Первая команда проверяет настройки; отсутствие вывода означает успех.
+Вторая скачивает образы, устанавливает зависимости и запускает окружение в фоне.
+Первый запуск требует интернета и может занять несколько минут.
+Третья показывает состояние контейнеров; повторяйте её, пока они запускаются.
 
-| Адрес | Что открывается |
+| Сервис | Ожидаемый статус | Назначение |
+|---|---|---|
+| db | Up / healthy | PostgreSQL и постоянное хранение данных |
+| migrate | Exited (0) | Успешно применил миграции 0001 и 0002 и завершился |
+| backend | Up / healthy | FastAPI |
+| cleanup | Up | Периодическая очистка |
+| frontend | Up / healthy | React/Vite |
+
+**Exited (0) у migrate — нормально.** Другой код означает ошибку.
+Игровой контент и пользователи автоматически не создаются. Общей учётной записи администратора нет.
+
+Если нужны только БД и таблицы, вместо полного запуска выполните:
+
+~~~sh
+docker compose up -d db
+docker compose run --rm --build migrate
+~~~
+
+Этот вариант не запускает frontend, API и автоматическую очистку.
+При необходимости очистку включите отдельно: docker compose up -d cleanup.
+
+## 5. Проверить результат
+
+Откройте в браузере следующие адреса. Если меняли порты в .env, подставьте свои значения.
+
+| Адрес | Ожидаемый результат |
 |---|---|
-| http://localhost:5173 | React-приложение со статусом backend/БД |
-| http://localhost:8000/docs | Swagger API |
-| http://localhost:8000/health/live | Жив ли backend |
-| http://localhost:8000/health/ready | Подключение к БД и наличие миграции |
-| localhost:5432 | PostgreSQL для локального SQL-клиента |
+| http://localhost:5173 | Экран-заглушка со статусом backend и БД |
+| http://localhost:8000/docs | Swagger с существующими API |
+| http://localhost:8000/health/live | JSON со статусом ok |
+| http://localhost:8000/health/ready | status=ok, database=ready, ai_provider=mock |
 
-Это **окружение разработки**, не готовая игра и не production-deployment.
-Пока реализованы схема, миграция, очистка, healthcheck, frontend-каркас и AI-адаптер.
-Авторизация, игровые endpoint'ы, Context Builder, Evaluator и Game Engine ещё не реализованы.
-Readiness не вызывает платный API и не подтверждает доступность внешней модели.
+Проверьте схему:
 
-## Что запускает Compose
+~~~sh
+docker compose run --rm migrate alembic current
+~~~
 
-| Сервис | Назначение |
-|---|---|
-| `db` | PostgreSQL 17, автоматически создаёт БД из POSTGRES_DB |
-| `migrate` | Применяет Alembic-миграции до запуска приложений |
-| `backend` | Python 3.12, FastAPI, Pydantic, SQLAlchemy, psycopg, HTTPX для AI |
-| `cleanup` | Тот же Python-образ, периодическая очистка завершённых сессий |
-| `frontend` | Node 22, React, TypeScript, Vite, React Router |
+Ожидается **0002 (head)**. В users должно быть поле password_hash.
+Readiness не вызывает модель и не проверяет ключ внешнего AI.
 
-Это несколько контейнеров в одном Compose-проекте, с общей сетью и запуском одной командой.
-AI-клиент находится внутри backend, отдельный AI-сервер не нужен. Веса локальной модели,
-CUDA, Redis и векторная БД не устанавливаются: для выбранной архитектуры они пока не нужны.
-Тестовые зависимости включены в dev-образы: pytest, Ruff, Vitest и React Testing Library.
-Точные версии фиксируются в `backend/requirements.lock` и `frontend/package-lock.json`.
+## 6. Обновить существующую БД без потери данных
 
-Порядок запуска: healthy PostgreSQL → успешная миграция → backend/cleanup → frontend.
-Условия запуска соответствуют [документации Docker Compose](https://docs.docker.com/compose/how-tos/startup-order/).
+Если БД уже запускалась на миграции 0001, удалять её не нужно.
+Сначала сохраните свою работу в Git и сделайте резервную копию по разделу 11.
+После переключения на эту ветку выполните:
 
-## Работа внутри контейнеров
-
-```bash
-docker compose exec backend sh
-docker compose exec frontend sh
-docker compose exec db sh
-docker compose logs -f backend frontend cleanup
-```
-
-Код backend/frontend примонтирован с компьютера. Редактируйте файлы в IDE: backend
-перезапускается через `--reload`, Vite обновляет страницу. Пересборка нужна при изменении зависимостей.
-`node_modules` хранится в отдельном volume, а не смешивается с Windows/macOS-зависимостями.
-
-Внутри Docker хост БД — `db`, порт — `5432`. На компьютере хост — `localhost`, порт — `DB_PORT`.
-Для SQL-консоли (команда использует настройки самого контейнера):
-
-```bash
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-```
-
-Внутри psql: `\dt` покажет таблицы, `\d game_sessions` — поля, `\q` — выход.
-После старта будут 9 таблиц приложения и служебная `alembic_version`.
-Контент и пользователи автоматически не создаются: методические данные команда заполнит отдельно.
-
-## Схема и миграции
-
-Описание: [docs/data_architecture.md](docs/data_architecture.md).
-Точная начальная схема: [0001_initial.sql](backend/migrations/versions/0001_initial.sql).
-
-- Все подготовленные задания — `missions`, карта строится по storyline_id/branch_key/order_index.
-- Темы, методики и статьи — иерархическая `knowledge_items`.
-- PAEI и сложность — отдельные справочники.
-- Custom не создаёт миссию: параметры хранятся в сессии.
-- Удаление сессии каскадно удаляет её сообщения.
-
-Если нужны только БД и таблицы без заглушек backend/frontend/AI:
-
-```bash
+~~~sh
+git pull --ff-only
+docker compose stop backend frontend cleanup
+docker compose build
 docker compose up -d db
 docker compose run --rm migrate
-```
+docker compose run --rm migrate alembic current
+docker compose up -d
+docker compose ps -a
+~~~
 
-Эти команды не запускают frontend, API и автоматическую очистку.
-Для автоматической очистки отдельно выполните `docker compose up -d cleanup`.
+Если миграция завершилась с ошибкой, остановитесь до запуска приложений и прочитайте её вывод.
+0002 добавляет колонку к существующей таблице, сохраняя пользователей.
+У старых пользователей password_hash остаётся NULL: пароль ещё не задан.
+Вход по паролю для таких записей недоступен.
+Миграция не назначает общий пароль и не создаёт фиктивные хеши.
 
-```bash
-docker compose run --rm migrate
-docker compose exec backend alembic current
+Этот же порядок используйте при следующих обновлениях проекта.
+Не изменяйте уже применённые миграции; добавляйте новые.
+
+## 7. Работать с кодом и контейнерами
+
+Редактируйте backend/ и frontend/ в своей IDE. Эти папки примонтированы в контейнеры:
+FastAPI перезапускается при изменении Python-кода, Vite обновляет frontend.
+Обычные изменения исходников не требуют пересборки.
+
+Просмотр логов:
+
+~~~sh
+docker compose logs --tail=100 backend
+docker compose logs --tail=100 migrate
+docker compose logs -f frontend backend
+~~~
+
+Ctrl+C завершает просмотр логов, но не останавливает контейнеры.
+
+Войти в терминал нужного контейнера:
+
+~~~sh
+docker compose exec backend sh
+docker compose exec frontend sh
+~~~
+
+Внутри контейнера рабочая папка — /app; exit возвращает в терминал компьютера.
+Там запускайте обычные pytest, alembic current, npm test без префикса docker compose.
+Из терминала компьютера тот же вызов выглядит так:
+
+~~~sh
+docker compose exec backend pytest -q
+~~~
+
+Точные зависимости зафиксированы в backend/requirements.lock и frontend/package-lock.json.
+При изменении зависимостей обновите соответствующий lock-файл и пересоберите окружение по разделу 6.
+Новая миграция создаётся так:
+
+~~~sh
 docker compose exec backend alembic revision -m "describe change"
-```
+~~~
 
-Новую миграцию редактируют вручную; ORM-моделей для autogenerate пока нет.
-Не изменяйте уже применённую `0001`: для следующих изменений добавляйте новую миграцию.
-Схема не завязана на `/docker-entrypoint-initdb.d`: миграции работают и с существующим volume.
-После `git pull` для обновления окружения повторите `docker compose up --build -d`.
+Заполните upgrade/downgrade в созданном файле и примените через сервис migrate.
+ORM-моделей для autogenerate пока нет.
 
-## Срок хранения сессий и диалогов
+## 8. Посмотреть таблицы и пользователей
 
-Это обычные таблицы с ограниченным сроком хранения, **не SQL TEMP TABLE**:
-[в PostgreSQL временная таблица принадлежит соединению](https://www.postgresql.org/docs/17/sql-createtable.html),
-а игровая сессия должна переживать переподключения и перезапуск backend.
+Для стандартных POSTGRES_USER=arena и POSTGRES_DB=arena:
 
-| Переменная `.env` | По умолчанию | Поведение |
-|---|---:|---|
-| `HISTORY_RETENTION_DAYS` | 7 | После завершения удалить сообщения, state, memory, custom_context и config_snapshot |
-| `SESSION_RETENTION_DAYS` | 30 | После завершения удалить саму сессию вместе с final_result |
-| `ACTIVE_SESSION_IDLE_DAYS` | 30 | Неактивную сессию пометить abandoned; сроки очистки начнутся с этого момента |
-| `RETENTION_INTERVAL_SECONDS` | 3600 | Период между пакетами очистки |
+~~~sh
+docker compose exec db psql -U arena -d arena
+~~~
 
-Для очистки на ближайшем проходе после завершения выставьте соответствующий срок в 0.
-Срок хранения сессии не может быть меньше срока хранения истории.
-В каждом проходе обрабатывается до 200 записей каждого типа; при большой очереди очистка займёт несколько проходов.
-Активные недавно использованные сессии не чистятся. Будущий обработчик ходов обязан
-обновлять `last_activity_at`, проверять status/lock_version и работать с блокировкой строки сессии.
-Истёкшую или очищенную сессию продолжать нельзя — требуется новая.
+Если меняли эти настройки, подставьте свои значения вместо arena.
+Внутри psql выполните по очереди:
 
-Важно: после удаления сессии исчезают её результаты. Долговременный прогресс сюжетки,
-достижения и статистика пока не реализованы и не должны вычисляться из уже очищенной истории.
-Если они нужны, до включения игры добавьте отдельное долговременное хранение прогресса.
-До удаления сессии `final_result` может содержать текст обратной связи — это не обещание
-полного удаления всех личных данных через 7 дней. Резервные копии имеют отдельный срок хранения.
+~~~sql
+\dt
+\d users
+SELECT version_num FROM alembic_version;
+SELECT id, display_name, email, password_hash IS NOT NULL AS has_password FROM users;
+\q
+~~~
 
-Просмотр кандидатов и ручной запуск:
+Первая команда показывает таблицы, вторая — колонки users, последняя — выход.
+Будет 9 таблиц приложения и служебная alembic_version.
 
-```bash
-docker compose exec backend python -m app.retention
-docker compose exec backend python -m app.retention --apply
-docker compose logs cleanup
-```
+Не записывайте исходный пароль в password_hash. Поле предназначено для результата
+стойкого алгоритма хеширования паролей с солью. Используйте endpoint регистрации в Swagger.
+Хеш не возвращают в API, не показывают на frontend и не пишут в логи.
 
-Без `--apply` транзакция откатывается и данные остаются. С `--apply` удаление необратимо
-без резервной копии. Автоматический cleanup запускается с `--apply`.
-После изменения `.env`: `docker compose up -d --force-recreate backend cleanup`.
+Для DBeaver/pgAdmin используйте host localhost, port из DB_PORT и реквизиты из .env.
+Адрес db:5432 работает между контейнерами, а не в SQL-клиенте на компьютере.
 
-## Подключение AI
+## 9. Подключить AI при необходимости
 
-По умолчанию `AI_PROVIDER=mock`: окружение запускается без ключа, ответ отмечен `[MOCK]`.
-Для провайдера с совместимым `/chat/completions` укажите в `.env`:
+С AI_PROVIDER=mock ключ не нужен: клиент возвращает фиксированную реплику.
+Для провайдера с endpoint /chat/completions измените .env:
 
-```dotenv
+~~~dotenv
 AI_PROVIDER=compatible
 AI_BASE_URL=https://your-provider.example/v1
 AI_API_KEY=your-private-key
 AI_MODEL=provider-model-id
 AI_TIMEOUT_SECONDS=30
-```
+~~~
 
-После изменения пересоздайте backend и cleanup. Пробный вызов (в compatible-режиме может стоить денег):
+Замените URL, ключ и модель реальными значениями провайдера. Затем:
 
-```bash
+~~~sh
+docker compose up -d --force-recreate backend cleanup
 docker compose exec backend python -m app.ai
-```
+~~~
 
-Базовый адаптер реализует текстовый запрос и timeout. JSON-контракт Evaluator,
-prompt-версии и восстановление игрового хода описаны в архитектуре, но ещё не реализованы.
-Ключ находится только в backend-окружении; не добавляйте его в `VITE_*`, git или Dockerfile.
+Последняя команда делает пробный запрос, который провайдер может тарифицировать.
+Она проверяет клиент, а не игровой процесс. Не переносите ключ в переменные VITE_*.
 
-## Проверки
+## 10. Настроить хранение истории
 
-```bash
+При полном запуске cleanup автоматически удаляет истёкшие данные.
+
+| Переменная .env | По умолчанию | Поведение |
+|---|---:|---|
+| HISTORY_RETENTION_DAYS | 7 | Через столько дней после завершения удалить сообщения, state, memory_summary, custom_context и config_snapshot |
+| SESSION_RETENTION_DAYS | 30 | Через столько дней после завершения удалить сессию и final_result |
+| ACTIVE_SESSION_IDLE_DAYS | 30 | После такого простоя пометить активную игру abandoned; с этого момента идут сроки хранения |
+| RETENTION_INTERVAL_SECONDS | 3600 | Пауза между проходами очистки |
+
+Срок сессии должен быть не меньше срока истории. Значение 0 у срока сессии/истории означает
+удаление на ближайшем проходе после завершения. Один проход обрабатывает до 200 записей каждого типа.
+После изменения .env выполните docker compose up -d --force-recreate backend cleanup.
+
+Посмотреть кандидатов на очистку без сохранения изменений:
+
+~~~sh
+docker compose exec backend python -m app.retention
+~~~
+
+Фактически удалить данные:
+
+~~~sh
+docker compose exec backend python -m app.retention --apply
+~~~
+
+После удаления сессии исчезает её результат. Долговременный прогресс сюжетки пока не реализован.
+final_result может содержать текст до удаления сессии. Резервные копии очищаются отдельно.
+
+## 11. Создать резервную копию
+
+Для стандартных имени пользователя и БД arena (замените их, если меняли .env):
+
+~~~sh
+docker compose exec db pg_dump -U arena -d arena -Fc -f /tmp/arena-backup.dump
+docker compose cp db:/tmp/arena-backup.dump ./arena-backup.dump
+~~~
+
+Команды одинаковы для PowerShell и Bash: дамп создаётся внутри контейнера, затем копируется на компьютер.
+Проверьте, что файл появился и имеет ненулевой размер. Сохраните отдельную датированную копию:
+повторный запуск использует то же имя. Дамп содержит данные и хеши; не публикуйте его.
+
+Проверить восстановление в отдельной, ещё не существующей БД:
+
+~~~sh
+docker compose cp ./arena-backup.dump db:/tmp/arena-restore.dump
+docker compose exec db createdb -U arena arena_restore_check
+docker compose exec db pg_restore -U arena -d arena_restore_check --exit-on-error /tmp/arena-restore.dump
+docker compose exec db psql -U arena -d arena_restore_check -c "SELECT version_num FROM alembic_version;"
+~~~
+
+Рабочая БД не подменяется. Если arena_restore_check уже существует, используйте другое имя.
+
+## 12. Запустить проверки
+
+Окружение должно быть запущено. Из корня проекта:
+
+~~~sh
 docker compose exec backend pytest -q
 docker compose exec backend ruff check app tests migrations
 docker compose exec -e RUN_DB_TESTS=1 backend pytest -q
 docker compose exec frontend npm run build
 docker compose exec frontend npm test
-```
+~~~
 
-DB-тесты создают уникальную схему `arena_test_*` внутри dev-БД и удаляют только её.
-Они проверяют ограничения, каскадное удаление, dry-run, очистку и сохранение активной истории.
-Не запускайте их с production-реквизитами. Проверка всего стека: `sh infrastructure/smoke.sh`.
+Первый вызов пропускает DB-тесты (skipped). Третий запускает также интеграционные тесты БД:
+миграции, сохранение пользователей, хранение хеша, ограничения и очистку.
+Каждый тест создаёт отдельную схему arena_test_* и удаляет только её.
+Используйте dev-БД, не production-реквизиты.
 
-Обновление зависимостей выполняйте осознанно с пересозданием lock-файлов:
+В Bash/Git Bash полный набор можно запустить через sh infrastructure/smoke.sh.
+Скрипт оставляет контейнеры работающими.
 
-```bash
-# frontend: обновить package.json, затем
-docker compose exec frontend npm install
-# backend: обновить requirements.in, локально с установленным uv
-uv pip compile backend/requirements.in -o backend/requirements.lock --python-version 3.12
-docker compose up --build -d
-```
+## 13. Остановить и запустить повторно
 
-## Остановка, резервная копия и ограничения
+Приостановить с сохранением данных:
 
-```bash
+~~~sh
 docker compose stop
+~~~
+
+Продолжить после stop:
+
+~~~sh
 docker compose start
+~~~
+
+Удалить контейнеры и сеть, сохранив PostgreSQL-volume:
+
+~~~sh
 docker compose down
-```
+~~~
 
-Эти команды сохраняют volume PostgreSQL. **`docker compose down -v` удалит БД и node_modules-volume**;
-используйте только если действительно хотите уничтожить локальные данные.
-Пример резервной копии в Bash (сохраните файл вне git):
+После down запускайте через docker compose up -d.
+**Не добавляйте -v к down, если хотите сохранить БД:** этот флаг удаляет volumes.
+Для обновления схемы он не нужен.
 
-```bash
-docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > arena-backup.sql
-```
+## Если что-то не работает
 
-Порты опубликованы только на 127.0.0.1. Для общего стенда понадобятся TLS, авторизация,
-ограничения доступа, отдельный непривилегированный пользователь приложения в БД и production-образы.
-В dev `POSTGRES_USER` используется также приложением и имеет права создания схем для миграций.
-Смена пароля в `.env` не меняет пароль уже созданного PostgreSQL-volume: измените его SQL-командой
-в БД и затем обновите `.env`, не удаляйте volume ради смены пароля.
-Если порт занят, измените DB_PORT/BACKEND_PORT/FRONTEND_PORT в `.env`.
+| Симптом | Что делать |
+|---|---|
+| Cannot connect to Docker daemon | Запустить Docker, проверить раздел Server в docker version |
+| .env не найден | Выполнить шаг 3 из корня проекта |
+| Port is already allocated | Изменить соответствующий DB_PORT/BACKEND_PORT/FRONTEND_PORT и повторить docker compose up -d |
+| migrate завершился с ошибкой | Посмотреть docker compose logs --tail=100 migrate; повторить docker compose run --rm migrate и прочитать ошибку |
+| password_hash не найден | Выполнить docker compose run --rm --build migrate, проверить alembic current |
+| Backend unhealthy / readiness 503 | Проверить логи backend, готовность db и миграции до 0002 |
+| Frontend не соединяется с API | Проверить backend/ready и docker compose logs --tail=100 frontend backend |
+| Неверный пароль БД после изменения .env | .env не меняет пароль существующего PostgreSQL-volume. Вернуть прежнее значение либо отдельно изменить пароль роли в БД и согласовать .env; volume не удалять |
+| Зависимости не обновились | Проверить lock-файлы и пересобрать по разделу 6 |
+| Ошибка AI compatible | Проверить URL, ключ и модель; для инфраструктуры вернуть mock |
 
-## Roadmap MVP
+Это локальное dev-окружение: порты опубликованы на 127.0.0.1, приложение использует
+реквизиты с правами миграции. Перед публичным развёртыванием нужны проверка авторизации,
+TLS, разграничение прав и production-настройки.
 
-```mermaid
-flowchart TD
-    A["1. Методология и контракты"] --> B["2. Технический фундамент"]
-    B --> C["3. AI-вертикальный срез"]
-    C --> D["4. Игровой путь"]
-    D --> E["5. Контент и конструктор"]
-    E --> F["6. Тестирование и стенд"]
-    F --> G["MVP · 30.09"]
-    A --> C
-    A --> E
-```
+## Документация проекта
 
-### Критический путь
-
-`методические правила → JSON-контракт Evaluator → Game Engine → AI Opponent → игровой чат → финальный PAEI → экран результата → сквозной тест`
-
-| Этап | Результат | Целевая дата |
-|---|---|---|
-| 1. Решения | Зафиксированы PAEI, состояние, подсказки, завершение и scoring | 17–18.09 |
-| 2. Основа | Запускаются frontend, backend и PostgreSQL; есть миграции и healthcheck | 18–19.09 |
-| 3. Вертикальный срез | Реплика проходит Evaluator → Engine → Opponent и сохраняется | 20–22.09 |
-| 4. Игровой путь | Игрок проходит уровень от вводной до результата | 23–25.09 |
-| 5. Конструктор | Администратор создаёт и тестирует уровень; работает кастомная ситуация | 25–27.09 |
-| 6. Стабилизация | Контрактные, методические и сквозные тесты; демоданные и стенд | 27–29.09 |
-| 7. Демонстрация | Зафиксированная версия MVP | 30.09 |
-
-Подробный план: [`docs/development_plan.md`](docs/development_plan.md).
+- [Данные, таблицы и сессии](docs/data_architecture.md)
+- [Продукт и игровой процесс](docs/product_and_game_design.md)
+- [Scoring и состояние игры](docs/scoring_and_game_state.md)
+- [Сложность уровней](docs/level_difficulty_design.md)
+- [План разработки и roadmap MVP](docs/development_plan.md)

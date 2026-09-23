@@ -7,6 +7,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      '/api/v1': { target: process.env.API_PROXY_TARGET || 'http://localhost:8000' },
       '/openapi.json': { target: process.env.API_PROXY_TARGET || 'http://localhost:8000' },
       '/api': {
         target: process.env.API_PROXY_TARGET || 'http://localhost:8000',
