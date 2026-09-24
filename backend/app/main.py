@@ -7,6 +7,8 @@ from app.catalog.router import router as catalog_router
 from app.config import get_settings
 from app.db import engine
 from app.users.router import router as users_router
+from app.sessions.router import router as sessions_router
+from app.sessions.websocket import router as websocket_router
 
 app = FastAPI(
     title='Арена переговоров', version='0.1.0',
@@ -16,6 +18,8 @@ app = FastAPI(
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(catalog_router)
+app.include_router(sessions_router)
+app.include_router(websocket_router)
 
 @app.get('/health/live')
 def live():
