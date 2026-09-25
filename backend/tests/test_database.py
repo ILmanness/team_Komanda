@@ -6,11 +6,18 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
 from app import retention
+from app.auth import dependencies as auth_dependencies
+from app.auth.security import create_access_token
 from app.config import Settings, get_settings
+from app.game import service as game_service
+from app.main import app
+from app.sessions import router as sessions_router
+from app.sessions import websocket as sessions_websocket
 
 pytestmark = pytest.mark.skipif(os.getenv('RUN_DB_TESTS') != '1', reason='Requires PostgreSQL')
 
@@ -101,6 +108,40 @@ def test_duplicate_message_rejected(database):
 def test_story_without_storyline_rejected(database):
     with pytest.raises(IntegrityError), database.begin() as connection:
         connection.execute(text("INSERT INTO missions(mission_type, interaction_type, title, task) VALUES ('story', 'ai_dialogue', 'bad', 'bad')"))
+
+
+def test_game_custom_session_websocket_round_trip(database, monkeypatch):
+    monkeypatch.setattr(auth_dependencies, 'engine', database)
+    monkeypatch.setattr(sessions_router, 'engine', database)
+    monkeypatch.setattr(sessions_websocket, 'engine', database)
+    monkeypatch.setattr(game_service, 'engine', database)
+    with database.begin() as connection:
+        user_id = connection.execute(text("INSERT INTO users(display_name) VALUES ('Player') RETURNING id")).scalar_one()
+    token = create_access_token(user_id)
+    client = TestClient(app)
+    headers = {'Authorization': f'Bearer {token}'}
+    created = client.post('/api/v1/sessions', headers=headers, json={
+        'mode': 'custom', 'custom_context': {
+            'situation': 'Команда обсуждает срок проекта.',
+            'player_role': 'Руководитель', 'opponent_role': 'Заказчик',
+            'goal': 'Согласовать новый срок.',
+        },
+    })
+    assert created.status_code == 201, created.text
+    session_id = created.json()['id']
+    assert client.get(f'/api/v1/sessions/{session_id}', headers=headers).status_code == 200
+    with client.websocket_connect(f'/api/v1/ws/sessions/{session_id}?token={token}') as socket:
+        assert socket.receive_json()['type'] == 'session.connected'
+        socket.send_json({'type': 'player.message', 'idempotency_key': str(uuid4()), 'content': 'Давайте обсудим сроки.'})
+        assert socket.receive_json()['type'] == 'message.accepted'
+        opponent = socket.receive_json()
+        assert opponent['type'] == 'opponent.message', opponent
+        assert socket.receive_json()['type'] == 'state.update'
+    messages = client.get(f'/api/v1/sessions/{session_id}/messages', headers=headers)
+    assert messages.status_code == 200
+    assert [message['role'] for message in messages.json()['messages']] == ['user', 'assistant']
+    finished = client.post(f'/api/v1/sessions/{session_id}/finish', headers=headers)
+    assert finished.status_code == 200 and finished.json()['status'] == 'completed'
 
 
 @pytest.mark.parametrize('database', ['0001'], indirect=True)

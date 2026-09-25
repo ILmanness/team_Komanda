@@ -53,6 +53,41 @@ class MissionDetail(MissionListItem):
     updated_at: datetime
 
 
+class CharacterOption(BaseModel):
+    id: UUID
+    name: str
+    role_title: str
+    description: str
+
+
+class PaeiOption(BaseModel):
+    id: UUID
+    code: str
+    leading_letter: str
+
+
+class DifficultyOption(BaseModel):
+    id: UUID
+    code: str
+    title: str
+
+
+class GameOptions(BaseModel):
+    characters: list[CharacterOption]
+    paei_profiles: list[PaeiOption]
+    difficulty_profiles: list[DifficultyOption]
+
+
+class MissionBriefing(BaseModel):
+    id: UUID
+    storyline_id: UUID | None
+    mission_type: str
+    interaction_type: str
+    title: str
+    task: str
+    character: CharacterOption | None
+
+
 class KnowledgeListItem(CatalogBase):
     parent_id: UUID | None = None
 

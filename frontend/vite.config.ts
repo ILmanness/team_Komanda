@@ -6,8 +6,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    watch: { usePolling: true, interval: 1000 },
     proxy: {
-      '/api/v1': { target: process.env.API_PROXY_TARGET || 'http://localhost:8000' },
+      '/api/v1': { target: process.env.API_PROXY_TARGET || 'http://localhost:8000', ws: true },
       '/openapi.json': { target: process.env.API_PROXY_TARGET || 'http://localhost:8000' },
       '/api': {
         target: process.env.API_PROXY_TARGET || 'http://localhost:8000',

@@ -6,8 +6,10 @@ from sqlalchemy import text
 from app.db import engine
 
 from .schemas import (
+    GameOptions,
     KnowledgeDetail,
     KnowledgeListItem,
+    MissionBriefing,
     MissionDetail,
     MissionListItem,
     StorylineDetail,
@@ -165,17 +167,17 @@ def list_missions(
         WHERE status = 'published'
 
           AND (
-              :mission_type IS NULL
+              CAST(:mission_type AS text) IS NULL
               OR mission_type = :mission_type
           )
 
           AND (
-              :storyline_id IS NULL
+              CAST(:storyline_id AS uuid) IS NULL
               OR storyline_id = :storyline_id
           )
 
           AND (
-              :knowledge_item_id IS NULL
+              CAST(:knowledge_item_id AS uuid) IS NULL
               OR knowledge_item_id = :knowledge_item_id
           )
 
@@ -194,6 +196,39 @@ def list_missions(
         "knowledge_item_id": knowledge_item_id
 
     })
+
+
+@router.get('/game/options', response_model=GameOptions)
+def get_game_options():
+    return GameOptions(
+        characters=_fetch_all('SELECT id, name, role_title, description FROM characters ORDER BY name'),
+        paei_profiles=_fetch_all('SELECT id, code, leading_letter FROM paei_profiles ORDER BY code'),
+        difficulty_profiles=_fetch_all('SELECT id, code, title FROM difficulty_profiles ORDER BY title'),
+    )
+
+
+@router.get('/missions/{mission_id}/briefing', response_model=MissionBriefing)
+def get_mission_briefing(mission_id: UUID):
+    mission = _fetch_one('''
+        SELECT m.id, m.storyline_id, m.mission_type, m.interaction_type,
+               m.title, m.task, c.id AS character_id, c.name AS character_name,
+               c.role_title AS character_role_title, c.description AS character_description
+        FROM missions AS m
+        LEFT JOIN characters AS c ON c.id = m.character_id
+        WHERE m.id = :id AND m.status = 'published'
+    ''', {'id': mission_id})
+    if mission is None:
+        raise HTTPException(status_code=404, detail='Mission not found')
+    character = None
+    if mission['character_id'] is not None:
+        character = {
+            'id': mission['character_id'], 'name': mission['character_name'],
+            'role_title': mission['character_role_title'],
+            'description': mission['character_description'],
+        }
+    return MissionBriefing(**{
+        key: mission[key] for key in ('id', 'storyline_id', 'mission_type', 'interaction_type', 'title', 'task')
+    }, character=character)
 
 
 @router.get(
@@ -268,7 +303,7 @@ def list_knowledge(
         WHERE status = 'published'
 
           AND (
-              :parent_id IS NULL
+              CAST(:parent_id AS uuid) IS NULL
               OR parent_id = :parent_id
           )
 
