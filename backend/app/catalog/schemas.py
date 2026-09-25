@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CatalogBase(BaseModel):
@@ -86,6 +86,8 @@ class MissionBriefing(BaseModel):
     title: str
     task: str
     character: CharacterOption | None
+    choices: list[dict[str, str]] = Field(default_factory=list)
+    hints: list[str] = Field(default_factory=list)
 
 
 class KnowledgeListItem(CatalogBase):

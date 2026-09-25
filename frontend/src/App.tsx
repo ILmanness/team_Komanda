@@ -4,6 +4,7 @@ import { api, ApiError, KnowledgeDetail, KnowledgeItem, Mission, Storyline, Stor
 import { AuthContext } from './auth-context';
 import { CustomTrainingForm, SavedDialogs } from './CustomTraining';
 import { GameDialog, MissionSetup } from './GameSession';
+import { AdminPage } from './Admin';
 import './styles.css';
 
 type Resource<T> = { data: T | null; loading: boolean; error: string | null };
@@ -41,12 +42,14 @@ function AuthDialog({ close, signedIn }: { close: () => void; signedIn: (token: 
     setError('');
     setPending(true);
     try {
-      const result = mode === 'login' ? await api.login(email, password) : await api.register(email, password, String(form.get('display_name') || ''));
+      const result = mode === 'login'
+        ? await api.login(String(form.get('login') || ''), password)
+        : await api.register(email, password, String(form.get('display_name') || ''), String(form.get('login') || ''));
       signedIn(result.access_token, result.user);
       close();
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 401) setError('Неверная почта или пароль.');
-      else if (cause instanceof ApiError && cause.status === 409) setError('Такая почта уже зарегистрирована.');
+      if (cause instanceof ApiError && cause.status === 401) setError('Неверный логин, почта или пароль.');
+      else if (cause instanceof ApiError && cause.status === 409) setError('Такой логин или почта уже зарегистрированы.');
       else setError(cause instanceof ApiError ? cause.message : 'Нет связи с сервером.');
     } finally { setPending(false); }
   }
@@ -62,7 +65,8 @@ function AuthDialog({ close, signedIn }: { close: () => void; signedIn: (token: 
       </div>
       <form className="auth-form" onSubmit={submit}>
         {mode === 'register' && <label>Имя<input name="display_name" required maxLength={120} autoComplete="name" placeholder="Как к вам обращаться" /></label>}
-        <label>Электронная почта<input name="email" type="email" required autoComplete="email" placeholder="you@example.com" /></label>
+        <label>Логин{mode === 'login' ? ' или email' : ''}<input name="login" required minLength={mode === 'register' ? 3 : 1} maxLength={mode === 'register' ? 40 : 320} autoComplete="username" placeholder="Ваш логин" /></label>
+        {mode === 'register' && <label>Электронная почта<input name="email" type="email" required autoComplete="email" placeholder="you@example.com" /></label>}
         <label>Пароль<input name="password" type="password" required minLength={mode === 'register' ? 8 : 1} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="Ваш пароль" /></label>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="button primary full" disabled={pending}>{pending ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Создать аккаунт'} <span>↗</span></button>
@@ -89,7 +93,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={{ user, checking: checkingAuth, openAuth: () => setAuthOpen(true) }}><div className="app-shell">
     <header className="site-header">
       <Link className="brand" to="/" aria-label="Корпоративная крыса — на главную"><span>КОРПОРАТИВНАЯ<br /><strong>КРЫСА</strong></span></Link>
-      <nav className="main-nav" aria-label="Главная навигация"><NavLink to="/training">Тренировка</NavLink><NavLink to="/story">Сюжет</NavLink><NavLink to="/knowledge">База знаний</NavLink></nav>
+      <nav className="main-nav" aria-label="Главная навигация"><NavLink to="/training">Тренировка</NavLink><NavLink to="/story">Сюжет</NavLink><NavLink to="/knowledge">База знаний</NavLink>{user?.role === 'admin' && <NavLink to="/admin">Админка</NavLink>}</nav>
       <div className="header-actions">{user ? <><span className="user-name">{user.display_name}</span><button className="button outline small" onClick={logout}>Выйти</button></> : <button className="button outline small" onClick={() => setAuthOpen(true)}>Войти <span>↗</span></button>}</div>
     </header>
     <main id="main-content">{children}</main>
@@ -188,6 +192,7 @@ export default function App() {
     <Route path="/pvp" element={<PvpSoon />} />
     <Route path="/knowledge" element={<Knowledge />} />
     <Route path="/knowledge/:id" element={<KnowledgeDetailPage />} />
+    <Route path="/admin" element={<AdminPage />} />
     <Route path="*" element={<section className="section-wrap not-found"><span className="eyebrow">404 / Не найдено</span><h1>Похоже, здесь пока пусто.</h1><Link className="button primary" to="/">На главную <span>↗</span></Link></section>} />
   </Routes></Shell>;
 }

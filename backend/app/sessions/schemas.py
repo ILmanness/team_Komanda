@@ -119,6 +119,12 @@ class PlayerMessage(BaseModel):
     )
 
 
+class PlayerChoice(BaseModel):
+    type: str = Field(pattern=r'^player\.choice$')
+    idempotency_key: UUID
+    choice_id: str = Field(min_length=1, max_length=40)
+
+
 class WebSocketError(BaseModel):
     type: str = "error"
     code: str

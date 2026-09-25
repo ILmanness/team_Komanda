@@ -10,7 +10,6 @@ from .schemas import (
     KnowledgeDetail,
     KnowledgeListItem,
     MissionBriefing,
-    MissionDetail,
     MissionListItem,
     StorylineDetail,
     StorylineListItem,
@@ -211,7 +210,7 @@ def get_game_options():
 def get_mission_briefing(mission_id: UUID):
     mission = _fetch_one('''
         SELECT m.id, m.storyline_id, m.mission_type, m.interaction_type,
-               m.title, m.task, c.id AS character_id, c.name AS character_name,
+               m.title, m.task, m.config, c.id AS character_id, c.name AS character_name,
                c.role_title AS character_role_title, c.description AS character_description
         FROM missions AS m
         LEFT JOIN characters AS c ON c.id = m.character_id
@@ -226,53 +225,22 @@ def get_mission_briefing(mission_id: UUID):
             'role_title': mission['character_role_title'],
             'description': mission['character_description'],
         }
+    training = (mission['config'] or {}).get('training') or {}
     return MissionBriefing(**{
         key: mission[key] for key in ('id', 'storyline_id', 'mission_type', 'interaction_type', 'title', 'task')
-    }, character=character)
+    }, character=character,
+        choices=[{'id': item['id'], 'text': item['text']} for item in training.get('choices', [])],
+        hints=training.get('hints', []))
 
 
 @router.get(
     "/missions/{mission_id}",
-    response_model=MissionDetail
+    response_model=MissionBriefing
 )
 def get_mission(
     mission_id: UUID
 ):
-
-    item = _fetch_one("""
-        SELECT
-            id,
-            storyline_id,
-            knowledge_item_id,
-            mission_type,
-            interaction_type,
-            branch_key,
-            order_index,
-            title,
-            status,
-            character_id,
-            context,
-            task,
-            config,
-            created_at,
-            updated_at
-
-        FROM missions
-
-        WHERE id = :id
-          AND status = 'published'
-
-    """, {
-        "id": mission_id
-    })
-
-    if not item:
-        raise HTTPException(
-            status_code=404,
-            detail="Mission not found"
-        )
-
-    return item
+    return get_mission_briefing(mission_id)
 
 
 @router.get(

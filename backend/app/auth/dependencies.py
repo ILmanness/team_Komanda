@@ -37,6 +37,7 @@ def get_current_user(
                 SELECT
                     id,
                     email,
+                    login,
                     display_name,
                     role,
                     created_at,

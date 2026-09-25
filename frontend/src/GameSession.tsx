@@ -78,6 +78,7 @@ export function GameDialog() {
   const [reconnect, setReconnect] = useState(0);
   const [pending, setPending] = useState(false);
   const [text, setText] = useState('');
+  const [shownHints, setShownHints] = useState(0);
   const [error, setError] = useState('');
   const socketRef = useRef<WebSocket | null>(null);
   const pendingKey = useRef<{ text: string; key: string } | null>(null);
@@ -140,6 +141,15 @@ export function GameDialog() {
     socket.send(JSON.stringify({ type: 'player.message', idempotency_key: key, content }));
   }
 
+  function choose(choiceId: string) {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) { setError('Нет соединения с игрой. Подключитесь снова.'); return; }
+    const key = pendingKey.current?.text === choiceId ? pendingKey.current.key : crypto.randomUUID();
+    pendingKey.current = { text: choiceId, key };
+    setPending(true); setError('');
+    socket.send(JSON.stringify({ type: 'player.choice', idempotency_key: key, choice_id: choiceId }));
+  }
+
   async function finish() {
     const token = sessionStorage.getItem('arena_token');
     if (!token || !session) return;
@@ -161,19 +171,23 @@ export function GameDialog() {
   const name = briefing?.character?.name || custom?.opponent_name || custom?.opponent_role || briefing?.title || 'Разговор';
   const goal = briefing?.task || custom?.goal || 'Продолжайте разговор и пробуйте разные решения.';
   const active = session.status === 'active';
+  const choiceTraining = session.mode === 'method_training' && briefing?.interaction_type === 'single_choice';
   return <div className="section-wrap dialog-page">
     <Link className="back-link" to={back}>← Назад</Link>
     <div className="dialog-heading"><div><span className="eyebrow">{session.mode === 'story' ? 'Сюжет' : 'Тренировка'}</span><h1>{name}</h1><p>{briefing?.title || custom?.situation}</p></div><span className="pill">{session.state.turn || 0} реплик</span></div>
     <div className="dialog-layout"><aside className="dialog-brief"><span className="eyebrow">Ваша задача</span><h2>{goal}</h2>
       {custom && <dl><dt>Ваша роль</dt><dd>{custom.player_role}</dd><dt>Собеседник</dt><dd>{custom.opponent_role}</dd></dl>}
-      {session.ai_mode !== 'mock' && <div className="game-state"><span>Контакт {session.state.contact ?? 0}</span><span>Напряжение {session.state.tension ?? 0}</span><span>Прогресс {session.state.progress ?? 0}</span></div>}
+      {(session.ai_mode !== 'mock' || choiceTraining) && <div className="game-state"><span>Контакт {session.state.contact ?? 0}</span><span>Напряжение {session.state.tension ?? 0}</span><span>Прогресс {session.state.progress ?? 0}</span></div>}
       <Link to="/training/custom" className="text-link">Новый диалог ↗</Link></aside>
       <section className="dialog-main" aria-label="Диалог"><div className="dialog-messages" aria-live="polite">
         {messages.filter(item => item.role !== 'system' && item.processing_status === 'completed').length === 0 && <p className="dialog-empty">Вы начинаете разговор. Напишите первую реплику собеседнику.</p>}
         {messages.filter(item => item.role !== 'system' && item.processing_status === 'completed').map(message => <div className={`dialog-message ${message.role}`} key={message.id}><span>{message.role === 'user' ? 'Вы' : name}</span><p>{message.content}</p></div>)}
       </div>
-        {session.ai_mode === 'mock' && <p className="dialog-demo-note">Демо-режим: ответы собеседника заготовлены. Игровая оценка здесь не отражает качество переговоров.</p>}
-        {active ? <form className="dialog-compose" onSubmit={send}><label htmlFor="dialog-text">Ваш ответ</label><textarea id="dialog-text" value={text} onChange={event => setText(event.target.value)} rows={3} maxLength={10000} required placeholder="Напишите, что вы скажете собеседнику…" disabled={pending} />
+        {session.ai_mode === 'mock' && !choiceTraining && <p className="dialog-demo-note">Демо-режим: ответы собеседника заготовлены. Игровая оценка здесь не отражает качество переговоров.</p>}
+        {active && choiceTraining ? <div className="dialog-compose"><strong>Как вы ответите?</strong><div className="training-choices">{briefing.choices.map((choice, index) => <button type="button" key={choice.id} disabled={pending || connection !== 'ready'} onClick={() => choose(choice.id)}><span>{String.fromCharCode(65 + index)}</span>{choice.text}</button>)}</div>
+          {briefing.hints.length > 0 && <div className="training-hints"><button className="text-link" type="button" onClick={() => setShownHints(value => Math.min(value + 1, briefing.hints.length))} disabled={shownHints >= briefing.hints.length}>Показать подсказку ({shownHints}/{briefing.hints.length}) ↗</button>{briefing.hints.slice(0, shownHints).map((hint, index) => <p key={index}>{hint}</p>)}</div>}
+          {error && <p className="form-error" role="alert">{error}</p>}{pending && <p role="status">Смотрим последствия ответа…</p>}{connection === 'disconnected' && <button className="button outline" type="button" onClick={() => setReconnect(value => value + 1)}>Подключиться снова</button>}
+        </div> : active ? <form className="dialog-compose" onSubmit={send}><label htmlFor="dialog-text">Ваш ответ</label><textarea id="dialog-text" value={text} onChange={event => setText(event.target.value)} rows={3} maxLength={10000} required placeholder="Напишите, что вы скажете собеседнику…" disabled={pending} />
           {error && <p className="form-error" role="alert">{error}</p>}
           {connection === 'disconnected' && <button className="button outline" type="button" onClick={() => setReconnect(value => value + 1)}>Подключиться снова</button>}
           <div><button className="button outline" type="button" onClick={finish} disabled={pending}>Завершить</button><button className="button primary" type="submit" disabled={pending || connection !== 'ready' || !text.trim()}>{pending ? 'Ждём ответа…' : connection === 'connecting' ? 'Подключаемся…' : 'Отправить'} <span>→</span></button></div></form>

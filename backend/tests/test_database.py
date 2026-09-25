@@ -11,8 +11,11 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
 from app import retention
+from app.admin import router as admin_router
 from app.auth import dependencies as auth_dependencies
+from app.auth import router as auth_router
 from app.auth.security import create_access_token
+from app.catalog import router as catalog_router
 from app.config import Settings, get_settings
 from app.game import service as game_service
 from app.main import app
@@ -142,6 +145,105 @@ def test_game_custom_session_websocket_round_trip(database, monkeypatch):
     assert [message['role'] for message in messages.json()['messages']] == ['user', 'assistant']
     finished = client.post(f'/api/v1/sessions/{session_id}/finish', headers=headers)
     assert finished.status_code == 200 and finished.json()['status'] == 'completed'
+
+
+def test_registration_has_login_and_display_name(database, monkeypatch):
+    monkeypatch.setattr(auth_router, 'engine', database)
+    monkeypatch.setattr(auth_dependencies, 'engine', database)
+    client = TestClient(app)
+    registered = client.post('/api/v1/auth/register', json={
+        'login': 'captain', 'email': 'captain@example.com',
+        'display_name': 'Капитан', 'password': 'long-password-123',
+    })
+    assert registered.status_code == 201, registered.text
+    assert registered.json()['user']['login'] == 'captain'
+    assert registered.json()['user']['display_name'] == 'Капитан'
+    assert client.post('/api/v1/auth/login', json={
+        'login': 'captain', 'password': 'long-password-123',
+    }).status_code == 200
+    assert client.post('/api/v1/auth/login', json={
+        'login': 'captain@example.com', 'password': 'long-password-123',
+    }).status_code == 200
+    assert client.post('/api/v1/auth/register', json={
+        'login': 'CAPTAIN', 'email': 'other@example.com',
+        'display_name': 'Other', 'password': 'long-password-123',
+    }).status_code == 409
+
+
+def test_admin_training_choice_is_private_and_playable(database, monkeypatch):
+    for module in (auth_dependencies, admin_router, catalog_router, sessions_router,
+                   sessions_websocket, game_service):
+        monkeypatch.setattr(module, 'engine', database)
+    with database.begin() as connection:
+        admin_id = connection.execute(text(
+            "INSERT INTO users(display_name, role) VALUES ('Admin', 'admin') RETURNING id"
+        )).scalar_one()
+        player_id = connection.execute(text(
+            "INSERT INTO users(display_name) VALUES ('Player') RETURNING id"
+        )).scalar_one()
+        paei_id = connection.execute(text('''
+            INSERT INTO paei_profiles(code, leading_letter, p_value, a_value, e_value, i_value)
+            VALUES ('TEST', 'P', 50, 50, 50, 50) RETURNING id
+        ''')).scalar_one()
+        difficulty_id = connection.execute(text('''
+            INSERT INTO difficulty_profiles(code, title, settings)
+            VALUES ('TEST', 'Test', :settings) RETURNING id
+        '''), {'settings': '{"max_turns":20}'}).scalar_one()
+    client = TestClient(app)
+    admin_headers = {'Authorization': f'Bearer {create_access_token(admin_id)}'}
+    player_token = create_access_token(player_id)
+    player_headers = {'Authorization': f'Bearer {player_token}'}
+    assert client.get('/api/v1/admin/overview', headers=player_headers).status_code == 403
+    character = client.post('/api/v1/admin/characters', headers=admin_headers, json={
+        'slug': 'test-anna', 'name': 'Анна', 'role_title': 'Коллега',
+        'description': 'Задаёт вопросы', 'base_prompt': 'Будь спокойной',
+    })
+    assert character.status_code == 201, character.text
+    knowledge = client.post('/api/v1/admin/knowledge', headers=admin_headers, json={
+        'slug': 'test-topic', 'title': 'Разговор о сроках', 'item_type': 'topic',
+        'summary': 'Про сроки', 'body': 'Материал',
+    })
+    assert knowledge.status_code == 201, knowledge.text
+    topic_id = knowledge.json()['id']
+    assert client.put(f'/api/v1/admin/knowledge/{topic_id}/status', headers=admin_headers,
+                      json={'status': 'published'}).status_code == 200
+    mission = client.post('/api/v1/admin/missions', headers=admin_headers, json={
+        'mission_type': 'method_training', 'interaction_type': 'single_choice',
+        'knowledge_item_id': topic_id, 'character_id': character.json()['id'],
+        'title': 'Сорванный срок', 'situation': 'Команда опаздывает с релизом.',
+        'task': 'Выберите ответ', 'opening_message': 'Что со сроком?',
+        'hints': ['Признайте проблему'],
+        'choices': [
+            {'id': 'good', 'text': 'Обсудим новый план', 'feedback': 'Хороший ход',
+             'quality': .9, 'progress': 70},
+            {'id': 'bad', 'text': 'Это не моя проблема', 'feedback': 'Плохой ход',
+             'quality': .1, 'progress': 5},
+        ],
+    })
+    assert mission.status_code == 201, mission.text
+    mission_id = mission.json()['id']
+    assert client.put(f'/api/v1/admin/missions/{mission_id}/status', headers=admin_headers,
+                      json={'status': 'published'}).status_code == 200
+    public = client.get(f'/api/v1/missions/{mission_id}').json()
+    assert 'config' not in public and 'context' not in public
+    assert public['choices'] == [{'id': 'good', 'text': 'Обсудим новый план'},
+                                 {'id': 'bad', 'text': 'Это не моя проблема'}]
+    session = client.post('/api/v1/sessions', headers=player_headers, json={
+        'mode': 'method_training', 'mission_id': mission_id,
+        'paei_profile_id': str(paei_id), 'difficulty_profile_id': str(difficulty_id),
+    })
+    assert session.status_code == 201, session.text
+    session_id = session.json()['id']
+    with client.websocket_connect(f'/api/v1/ws/sessions/{session_id}?token={player_token}') as socket:
+        assert socket.receive_json()['type'] == 'session.connected'
+        socket.send_json({'type': 'player.choice', 'choice_id': 'good',
+                          'idempotency_key': str(uuid4())})
+        events = [socket.receive_json() for _ in range(4)]
+        assert [event['type'] for event in events] == [
+            'message.accepted', 'opponent.message', 'state.update', 'game.finished',
+        ], events
+        assert events[-1]['final_result']['result'] == 'success'
+    assert client.get(f'/api/v1/sessions/{session_id}', headers=player_headers).json()['status'] == 'completed'
 
 
 @pytest.mark.parametrize('database', ['0001'], indirect=True)

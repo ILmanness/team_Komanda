@@ -55,9 +55,32 @@ it('signs in through the auth endpoint and shows the user', async () => {
   vi.stubGlobal('fetch', fetchMock);
   renderAt('/');
   fireEvent.click(screen.getByRole('button', { name: /Войти/ }));
-  fireEvent.change(screen.getByPlaceholderText('you@example.com'), { target: { value: 'test@example.com' } });
+  fireEvent.change(screen.getByPlaceholderText('Ваш логин'), { target: { value: 'test' } });
   fireEvent.change(screen.getByPlaceholderText('Ваш пароль'), { target: { value: 'password123' } });
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Войти/ }));
   expect(await screen.findByText('Тестовый игрок')).toBeTruthy();
   expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/login', expect.objectContaining({ method: 'POST' }));
+});
+
+it('sends login and display name during registration', async () => {
+  const fetchMock = vi.fn().mockImplementation((path: string) => Promise.resolve({
+    ok: true,
+    json: async () => path === '/api/v1/auth/register'
+      ? { access_token: 'registered-token', user: { id: '2', login: 'captain', email: 'captain@example.com', display_name: 'Капитан', role: 'player' } }
+      : { status: 'ok', database: 'ready', ai_provider: 'mock' },
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  renderAt('/');
+  fireEvent.click(screen.getByRole('button', { name: /Войти/ }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Регистрация' }));
+  fireEvent.change(screen.getByPlaceholderText('Как к вам обращаться'), { target: { value: 'Капитан' } });
+  fireEvent.change(screen.getByPlaceholderText('Ваш логин'), { target: { value: 'captain' } });
+  fireEvent.change(screen.getByPlaceholderText('you@example.com'), { target: { value: 'captain@example.com' } });
+  fireEvent.change(screen.getByPlaceholderText('Ваш пароль'), { target: { value: 'long-password-123' } });
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Создать аккаунт/ }));
+  expect(await screen.findByText('Капитан')).toBeTruthy();
+  const request = fetchMock.mock.calls.find(([path]) => path === '/api/v1/auth/register');
+  expect(JSON.parse(request?.[1].body)).toEqual({
+    email: 'captain@example.com', password: 'long-password-123', display_name: 'Капитан', login: 'captain',
+  });
 });

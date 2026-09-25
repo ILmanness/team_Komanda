@@ -12,7 +12,7 @@ from sqlalchemy import text
 from app.db import engine
 from app.game.service import GameService
 
-from .schemas import PlayerMessage
+from .schemas import PlayerChoice, PlayerMessage
 
 game_service = GameService()
 
@@ -141,11 +141,8 @@ async def session_websocket(
 
             try:
 
-                message = (
-                    PlayerMessage.model_validate(
-                        raw_message
-                    )
-                )
+                is_choice = raw_message.get('type') == 'player.choice' if isinstance(raw_message, dict) else False
+                message = (PlayerChoice if is_choice else PlayerMessage).model_validate(raw_message)
 
             except ValidationError as exc:
 
@@ -188,16 +185,41 @@ async def session_websocket(
 
                 continue
 
+            content = message.content if not is_choice else None
+            evaluation_override = None
+            response_override = None
+            if is_choice:
+                config = (session['config_snapshot'] or {}).get('mission') or {}
+                if config.get('config', {}).get('training') is None:
+                    await websocket.send_json({'type': 'error', 'code': 'choice_unavailable',
+                                               'message': 'This mission does not offer answer choices'})
+                    continue
+                choices = config['config']['training'].get('choices', [])
+                choice = next((item for item in choices if item['id'] == message.choice_id), None)
+                if choice is None:
+                    await websocket.send_json({'type': 'error', 'code': 'invalid_choice',
+                                               'message': 'Answer choice not found'})
+                    continue
+                content = choice['text']
+                response_override = choice['feedback']
+                evaluation_override = {
+                    'intent': 'proposal', 'quality': choice['quality'],
+                    'critical_error': choice['critical_error'], 'reason': choice['feedback'],
+                    'effects': {key: choice[key] for key in ('contact', 'tension', 'progress')},
+                }
+
             try:
 
                 result = (
                     await game_service.process_player_message(
                         session_id=session_id,
                         user_id=user_id,
-                        content=message.content,
+                        content=content,
                         idempotency_key=(
                             message.idempotency_key
                         ),
+                        evaluation_override=evaluation_override,
+                        response_override=response_override,
                     )
                 )
 

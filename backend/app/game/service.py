@@ -31,6 +31,8 @@ class GameService:
         user_id: UUID,
         content: str,
         idempotency_key: UUID,
+        evaluation_override: dict[str, Any] | None = None,
+        response_override: str | None = None,
     ) -> dict[str, Any]:
 
         accepted = self._create_pending_user_message(
@@ -113,7 +115,7 @@ class GameService:
                 ),
             )
 
-            evaluation = await self._evaluate(
+            evaluation = evaluation_override or await self._evaluate(
                 context=game_context,
                 player_message=content,
             )
@@ -195,9 +197,7 @@ class GameService:
                 final=final_result is not None,
             )
 
-            opponent_response = await complete(
-                opponent_messages
-            )
+            opponent_response = response_override or await complete(opponent_messages)
 
             assistant_message = self._save_opponent_response(
                 session_id=session_id,
@@ -760,12 +760,9 @@ class GameService:
             or {}
         ).get("context") or {}
 
-        raw = settings.get(
+        raw = mission_config.get(
             "max_turns",
-            mission_config.get(
-                "max_turns",
-                custom_context.get("turn_limit", 20),
-            ),
+            settings.get("max_turns", custom_context.get("turn_limit", 20)),
         )
 
         try:

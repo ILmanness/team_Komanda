@@ -22,7 +22,7 @@ router = APIRouter(
 )
 
 
-def get_user_by_email(email: str):
+def get_user_by_login(identifier: str):
     with engine.connect() as connection:
         result = connection.execute(
             text(
@@ -30,16 +30,18 @@ def get_user_by_email(email: str):
                 SELECT
                     id,
                     email,
+                    login,
                     display_name,
                     role,
                     created_at,
                     updated_at,
                     password_hash
                 FROM users
-                WHERE LOWER(email) = LOWER(:email)
+                WHERE LOWER(email) = LOWER(:identifier)
+                   OR LOWER(login) = LOWER(:identifier)
                 """
             ),
-            {"email": email},
+            {"identifier": identifier},
         ).mappings().first()
 
     return dict(result) if result else None
@@ -52,8 +54,9 @@ def get_user_by_email(email: str):
 )
 def register(data: RegisterRequest):
     email = str(data.email).lower()
+    login_name = data.login.lower()
 
-    existing_user = get_user_by_email(email)
+    existing_user = get_user_by_login(email) or get_user_by_login(login_name)
 
     if existing_user:
         raise HTTPException(
@@ -70,12 +73,14 @@ def register(data: RegisterRequest):
                     """
                     INSERT INTO users (
                         email,
+                        login,
                         password_hash,
                         display_name,
                         role
                     )
                     VALUES (
                         :email,
+                        :login,
                         :password_hash,
                         :display_name,
                         'player'
@@ -83,6 +88,7 @@ def register(data: RegisterRequest):
                     RETURNING
                         id,
                         email,
+                        login,
                         display_name,
                         role,
                         created_at,
@@ -91,6 +97,7 @@ def register(data: RegisterRequest):
                 ),
                 {
                     "email": email,
+                    "login": login_name,
                     "password_hash": hashed_password,
                     "display_name": data.display_name,
                 },
@@ -117,9 +124,9 @@ def register(data: RegisterRequest):
     response_model=AuthResponse,
 )
 def login(data: LoginRequest):
-    email = str(data.email).lower()
+    identifier = str(data.login or data.email).lower()
 
-    user = get_user_by_email(email)
+    user = get_user_by_login(identifier)
 
     if user is None or not user["password_hash"]:
         raise HTTPException(
@@ -141,6 +148,7 @@ def login(data: LoginRequest):
     public_user = {
         "id": user["id"],
         "email": user["email"],
+        "login": user["login"],
         "display_name": user["display_name"],
         "role": user["role"],
         "created_at": user["created_at"],

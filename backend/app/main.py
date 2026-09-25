@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.admin.router import router as admin_router
 from app.auth.router import router as auth_router
 from app.catalog.router import router as catalog_router
 from app.config import get_settings
@@ -16,6 +17,7 @@ app = FastAPI(
 )
 
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(users_router)
 app.include_router(catalog_router)
 app.include_router(sessions_router)

@@ -1,6 +1,7 @@
 export type User = {
   id: string;
   email: string | null;
+  login: string;
   display_name: string;
   role: string;
 };
@@ -91,6 +92,33 @@ export type MissionBriefing = {
   title: string;
   task: string;
   character: CharacterOption | null;
+  choices: { id: string; text: string }[];
+  hints: string[];
+};
+
+export type AdminStoryline = Storyline & { status: string };
+export type AdminCharacter = CharacterOption & { slug: string; base_prompt: string };
+export type AdminKnowledge = { id: string; slug: string; item_type: 'topic' | 'article' | 'method'; title: string; summary: string; body: string; parent_id: string | null; status: string };
+export type AdminMissionSummary = Mission & { character_id: string | null };
+export type AdminOverview = {
+  storylines: AdminStoryline[];
+  missions: AdminMissionSummary[];
+  characters: AdminCharacter[];
+  knowledge: AdminKnowledge[];
+  paei_profiles: GameOptions['paei_profiles'];
+  difficulty_profiles: GameOptions['difficulty_profiles'];
+};
+export type AdminChoice = { id: string; text: string; feedback: string; quality: number; contact: number; tension: number; progress: number; critical_error: boolean };
+export type AdminMission = AdminMissionSummary & {
+  task: string;
+  context: { situation?: string; opening_message?: string };
+  config: { max_turns?: number; training?: { choices: AdminChoice[]; hints: string[] } };
+};
+export type AdminMissionWrite = {
+  mission_type: Mission['mission_type']; interaction_type: 'ai_dialogue' | 'single_choice';
+  storyline_id: string | null; knowledge_item_id: string | null; character_id: string;
+  branch_key: string | null; order_index: number | null; title: string; situation: string;
+  task: string; opening_message: string; max_turns: number; choices: AdminChoice[]; hints: string[];
 };
 
 export type CreateSessionRequest = {
@@ -115,7 +143,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new ApiError(response.status, typeof payload.detail === 'string' ? payload.detail : 'Сервис временно недоступен');
+    const detail = Array.isArray(payload.detail)
+      ? payload.detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join('; ')
+      : payload.detail;
+    throw new ApiError(response.status, typeof detail === 'string' ? detail : 'Сервис временно недоступен');
   }
   return response.json() as Promise<T>;
 }
@@ -145,13 +176,21 @@ export const api = {
     method: 'POST', headers: { Authorization: `Bearer ${token}` },
   }),
   me: (token: string) => request<User>('/v1/users/me', { headers: { Authorization: `Bearer ${token}` } }),
-  login: (email: string, password: string) => request<AuthResponse>('/v1/auth/login', {
-    method: 'POST', body: JSON.stringify({ email, password }),
+  login: (login: string, password: string) => request<AuthResponse>('/v1/auth/login', {
+    method: 'POST', body: JSON.stringify({ login, password }),
   }),
-  register: (email: string, password: string, display_name: string) => request<AuthResponse>('/v1/auth/register', {
-    method: 'POST', body: JSON.stringify({ email, password, display_name }),
+  register: (email: string, password: string, display_name: string, login: string) => request<AuthResponse>('/v1/auth/register', {
+    method: 'POST', body: JSON.stringify({ email, password, display_name, login }),
   }),
   logout: () => request<{ message: string }>('/v1/auth/logout', { method: 'POST' }),
+  adminOverview: (token: string) => request<AdminOverview>('/v1/admin/overview', { headers: { Authorization: `Bearer ${token}` } }),
+  adminMission: (token: string, id: string) => request<AdminMission>(`/v1/admin/missions/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${token}` } }),
+  adminSave: (token: string, kind: 'storylines' | 'missions' | 'characters' | 'knowledge', body: unknown, id?: string) => request<{ id: string; status?: string }>(`/v1/admin/${kind}${id ? `/${encodeURIComponent(id)}` : ''}`, {
+    method: id ? 'PUT' : 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(body),
+  }),
+  adminStatus: (token: string, kind: 'storylines' | 'missions' | 'knowledge', id: string, status: 'draft' | 'published' | 'archived') => request<{ id: string; status: string }>(`/v1/admin/${kind}/${encodeURIComponent(id)}/status`, {
+    method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ status }),
+  }),
 };
 
 export function sessionSocketUrl(token: string, id: string) {
