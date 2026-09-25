@@ -7,6 +7,8 @@ from pydantic import ValidationError
 
 from app import ai
 from app.config import Settings
+from app.game.evaluator import Evaluator
+from app.game.game_engine import GameEngine
 from app.main import app
 
 
@@ -32,6 +34,22 @@ def test_database_password_is_not_url_interpolated():
 def test_mock_ai(monkeypatch):
     monkeypatch.setattr(ai, 'get_settings', lambda: Settings(_env_file=None, ai_provider='mock'))
     assert '[MOCK]' in asyncio.run(ai.complete([{'role': 'user', 'content': 'hello'}]))
+
+
+def test_mock_story_can_succeed_but_short_answers_do_not(monkeypatch):
+    from app.game import evaluator as evaluator_module
+    monkeypatch.setattr(evaluator_module, 'get_settings', lambda: Settings(_env_file=None, ai_provider='mock'))
+    evaluator = Evaluator()
+    engine = GameEngine()
+    state = {'turn': 0, 'contact': 0, 'tension': 0, 'progress': 0, 'critical_errors': 0}
+    for _ in range(9):
+        score = asyncio.run(evaluator.evaluate(
+            context={}, player_message='Давайте обсудим, как мы можем найти решение.',
+        ))
+        state = engine.apply_evaluation(state=state, evaluation=score)
+    assert engine.check_end_conditions(state=state)['reason'] == 'success'
+    assert engine.build_final_result(state=state, reason='success')['result'] == 'success'
+    assert asyncio.run(evaluator.evaluate(context={}, player_message='ок'))['effects']['progress'] == 2
 
 
 def test_compatible_ai(monkeypatch):

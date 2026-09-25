@@ -1,40 +1,7 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, ApiError, CustomSessionSettings, GameSessionSummary } from './api';
+import { api, ApiError, CustomSessionSettings } from './api';
 import { useAuth } from './auth-context';
-
-export function SavedDialogs() {
-  const { user } = useAuth();
-  const [dialogs, setDialogs] = useState<GameSessionSummary[]>([]);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    if (!user) { setDialogs([]); return; }
-    const token = sessionStorage.getItem('arena_token');
-    if (!token) return;
-    const controller = new AbortController();
-    setError(false);
-    api.sessions(token, controller.signal).then(setDialogs).catch(cause => {
-      if (cause.name !== 'AbortError') setError(true);
-    });
-    return () => controller.abort();
-  }, [user?.id]);
-
-  if (!user) return null;
-  return <section className="section-wrap saved-dialogs content-section">
-    <div className="content-toolbar"><div><span className="eyebrow">Личный архив</span><h2>Ваши разговоры</h2></div></div>
-    {error ? <div className="notice error">Не удалось загрузить разговоры. Обновите страницу.</div>
-      : dialogs.length ? <div className="saved-dialog-list">{dialogs.map(dialog =>
-        <Link className="saved-dialog" to={`/session/${dialog.id}`} key={dialog.id}>
-          <div><span className="eyebrow">{dialog.status === 'active' ? 'Продолжить' : 'Завершён'}</span>
-            <h3>{dialog.mission_title || dialog.custom_context?.opponent_name || dialog.custom_context?.opponent_role || 'Свой диалог'}</h3>
-            {dialog.custom_context?.situation && <p>{dialog.custom_context.situation}</p>}
-          </div>
-          <span className="saved-dialog-progress">{dialog.state.turn || 0} реплик <span aria-hidden="true">↗</span></span>
-        </Link>)}</div>
-      : <div className="notice">Вы ещё не начинали разговоров.</div>}
-  </section>;
-}
 
 export function CustomTrainingForm() {
   const navigate = useNavigate();

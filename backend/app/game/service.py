@@ -198,6 +198,7 @@ class GameService:
             )
 
             opponent_response = response_override or await complete(opponent_messages)
+            emotion = self._opponent_emotion(evaluation, updated_session['state'])
 
             assistant_message = self._save_opponent_response(
                 session_id=session_id,
@@ -205,6 +206,7 @@ class GameService:
                 user_message_id=user_message_id,
                 sequence_number=next_sequence + 1,
                 content=opponent_response,
+                emotion=emotion,
                 session_status=new_status,
             )
 
@@ -218,6 +220,7 @@ class GameService:
                         "sequence_number"
                     ],
                     "content": opponent_response,
+                    "emotion": emotion,
                 }
             )
 
@@ -606,6 +609,14 @@ class GameService:
                 },
             )
 
+            if new_status == 'completed' and final_result and final_result.get('result') == 'success':
+                connection.execute(text('''
+                    INSERT INTO story_mission_progress (user_id, mission_id)
+                    SELECT user_id, mission_id FROM game_sessions
+                    WHERE id = :session_id AND mode = 'story' AND mission_id IS NOT NULL
+                    ON CONFLICT (user_id, mission_id) DO NOTHING
+                '''), {'session_id': session_id})
+
             updated = connection.execute(
                 text(
                     """
@@ -634,6 +645,7 @@ class GameService:
         user_message_id: UUID,
         sequence_number: int,
         content: str,
+        emotion: str,
         session_status: str,
     ) -> dict[str, Any]:
 
@@ -655,7 +667,7 @@ class GameService:
                         :sequence_number,
                         'assistant',
                         :content,
-                        '{}',
+                        :payload,
                         'completed',
                         :reply_to_message_id
                     )
@@ -666,6 +678,7 @@ class GameService:
                     "session_id": session_id,
                     "sequence_number": sequence_number,
                     "content": content,
+                    "payload": Jsonb({'emotion': emotion}),
                     "reply_to_message_id": (
                         user_message_id
                     ),
@@ -705,6 +718,17 @@ class GameService:
             )
 
             return dict(assistant_message)
+
+    @staticmethod
+    def _opponent_emotion(evaluation: dict[str, Any], state: dict[str, Any]) -> str:
+        effects = evaluation.get('effects') or {}
+        if evaluation.get('critical_error') or state.get('tension', 0) >= 70:
+            return 'angry'
+        if effects.get('tension', 0) >= 2 or state.get('tension', 0) >= 35:
+            return 'tense'
+        if evaluation.get('quality', 0) >= 0.7 or effects.get('contact', 0) >= 2:
+            return 'warm'
+        return 'neutral'
 
     def _mark_message_failed(
         self,

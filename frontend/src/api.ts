@@ -4,6 +4,7 @@ export type User = {
   login: string;
   display_name: string;
   role: string;
+  created_at: string;
 };
 
 export type AuthResponse = { access_token: string; user: User };
@@ -29,6 +30,7 @@ export type Mission = {
 };
 
 export type StorylineDetail = Storyline & { missions: Mission[] };
+export type StoryProgress = { missions: { mission_id: string; unlocked: boolean; completed: boolean }[] };
 
 export type KnowledgeItem = {
   id: string;
@@ -72,11 +74,17 @@ export type GameSession = {
 
 export type GameSessionSummary = Pick<GameSession, 'id' | 'mode' | 'status' | 'mission_id' | 'custom_context' | 'state'> & {
   mission_title: string | null;
+  final_result: GameSession['final_result'];
   started_at: string;
   last_activity_at: string;
 };
 
-export type GameMessage = { id: string; sequence_number: number; role: 'user' | 'assistant' | 'system'; content: string; processing_status: string };
+export type AccountStats = {
+  conversations: number; active: number; finished: number; successful: number;
+  story_successes: number; trainings: number;
+};
+
+export type GameMessage = { id: string; sequence_number: number; role: 'user' | 'assistant' | 'system'; content: string; payload: { emotion?: string }; processing_status: string };
 
 export type CharacterOption = { id: string; name: string; role_title: string; description: string };
 export type GameOptions = {
@@ -154,6 +162,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const api = {
   storylines: (signal?: AbortSignal) => request<Storyline[]>('/v1/storylines', { signal }),
   storyline: (id: string, signal?: AbortSignal) => request<StorylineDetail>(`/v1/storylines/${encodeURIComponent(id)}`, { signal }),
+  storyProgress: (token: string, id: string, signal?: AbortSignal) => request<StoryProgress>(`/v1/storylines/${encodeURIComponent(id)}/progress`, {
+    signal, headers: { Authorization: `Bearer ${token}` },
+  }),
   missions: (type: Mission['mission_type'], signal?: AbortSignal) =>
     request<Mission[]>(`/v1/missions?mission_type=${type}`, { signal }),
   knowledge: (signal?: AbortSignal) => request<KnowledgeItem[]>('/v1/knowledge', { signal }),
@@ -176,6 +187,12 @@ export const api = {
     method: 'POST', headers: { Authorization: `Bearer ${token}` },
   }),
   me: (token: string) => request<User>('/v1/users/me', { headers: { Authorization: `Bearer ${token}` } }),
+  accountStats: (token: string, signal?: AbortSignal) => request<AccountStats>('/v1/users/me/stats', {
+    signal, headers: { Authorization: `Bearer ${token}` },
+  }),
+  updateProfile: (token: string, display_name: string) => request<User>('/v1/users/me', {
+    method: 'PATCH', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ display_name }),
+  }),
   login: (login: string, password: string) => request<AuthResponse>('/v1/auth/login', {
     method: 'POST', body: JSON.stringify({ login, password }),
   }),

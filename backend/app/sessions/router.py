@@ -8,6 +8,7 @@ from sqlalchemy import text
 from app.auth.dependencies import get_current_user
 from app.config import get_settings
 from app.db import engine
+from app.story_progress import get_story_progress
 
 from .schemas import (
     CreateSessionRequest,
@@ -74,7 +75,7 @@ def list_sessions(current_user: CurrentUser):
     with engine.connect() as connection:
         rows = connection.execute(text("""
             SELECT s.id, s.mode, s.status, s.mission_id, m.title AS mission_title,
-                   s.custom_context, s.state, s.started_at, s.last_activity_at
+                   s.custom_context, s.state, s.final_result, s.started_at, s.last_activity_at
             FROM game_sessions AS s
             LEFT JOIN missions AS m ON m.id = s.mission_id
             WHERE s.user_id = :user_id AND s.history_purged_at IS NULL
@@ -134,6 +135,7 @@ def create_session(
                         id,
                         character_id,
                         mission_type,
+                        storyline_id,
                         title,
                         context,
                         task,
@@ -155,6 +157,11 @@ def create_session(
                     status_code=404,
                     detail="Published mission not found",
                 )
+
+            if data.mode == 'story':
+                progress = get_story_progress(connection, mission['storyline_id'], user_id)
+                if not any(item['mission_id'] == mission['id'] and item['unlocked'] for item in progress):
+                    raise HTTPException(status_code=403, detail='Complete the previous story mission first')
 
         character_id = data.character_id
 
@@ -555,6 +562,7 @@ def finish_session(
             )
 
         final_result = {
+            "result": "failure",
             "reason": "user_finished",
             "completed_by": "player",
         }

@@ -58,7 +58,7 @@ it('signs in through the auth endpoint and shows the user', async () => {
   fireEvent.change(screen.getByPlaceholderText('Ваш логин'), { target: { value: 'test' } });
   fireEvent.change(screen.getByPlaceholderText('Ваш пароль'), { target: { value: 'password123' } });
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Войти/ }));
-  expect(await screen.findByText('Тестовый игрок')).toBeTruthy();
+  expect(await screen.findByRole('link', { name: /Тестовый игрок · Кабинет/ })).toBeTruthy();
   expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/login', expect.objectContaining({ method: 'POST' }));
 });
 
@@ -78,7 +78,7 @@ it('sends login and display name during registration', async () => {
   fireEvent.change(screen.getByPlaceholderText('you@example.com'), { target: { value: 'captain@example.com' } });
   fireEvent.change(screen.getByPlaceholderText('Ваш пароль'), { target: { value: 'long-password-123' } });
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Создать аккаунт/ }));
-  expect(await screen.findByText('Капитан')).toBeTruthy();
+  expect(await screen.findByRole('link', { name: /Капитан · Кабинет/ })).toBeTruthy();
   const request = fetchMock.mock.calls.find(([path]) => path === '/api/v1/auth/register');
   expect(JSON.parse(request?.[1].body)).toEqual({
     email: 'captain@example.com', password: 'long-password-123', display_name: 'Капитан', login: 'captain',

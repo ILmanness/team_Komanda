@@ -65,6 +65,7 @@ class SessionListItem(BaseModel):
     mission_title: str | None = None
     custom_context: dict[str, Any] | None = None
     state: dict[str, Any]
+    final_result: dict[str, Any] | None = None
     started_at: datetime
     last_activity_at: datetime
 

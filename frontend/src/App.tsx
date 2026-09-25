@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom';
-import { api, ApiError, KnowledgeDetail, KnowledgeItem, Mission, Storyline, StorylineDetail, User } from './api';
-import { AuthContext } from './auth-context';
-import { CustomTrainingForm, SavedDialogs } from './CustomTraining';
+import { api, ApiError, KnowledgeDetail, KnowledgeItem, Mission, Storyline, StorylineDetail, StoryProgress, User } from './api';
+import { AuthContext, useAuth } from './auth-context';
+import { CustomTrainingForm } from './CustomTraining';
 import { GameDialog, MissionSetup } from './GameSession';
 import { AdminPage } from './Admin';
+import { AccountPage } from './AccountPage';
 import './styles.css';
 
 type Resource<T> = { data: T | null; loading: boolean; error: string | null };
@@ -90,11 +91,11 @@ function Shell({ children }: { children: React.ReactNode }) {
     sessionStorage.removeItem('arena_token');
     setUser(null);
   }
-  return <AuthContext.Provider value={{ user, checking: checkingAuth, openAuth: () => setAuthOpen(true) }}><div className="app-shell">
+  return <AuthContext.Provider value={{ user, checking: checkingAuth, openAuth: () => setAuthOpen(true), updateUser: setUser }}><div className="app-shell">
     <header className="site-header">
       <Link className="brand" to="/" aria-label="Корпоративная крыса — на главную"><span>КОРПОРАТИВНАЯ<br /><strong>КРЫСА</strong></span></Link>
       <nav className="main-nav" aria-label="Главная навигация"><NavLink to="/training">Тренировка</NavLink><NavLink to="/story">Сюжет</NavLink><NavLink to="/knowledge">База знаний</NavLink>{user?.role === 'admin' && <NavLink to="/admin">Админка</NavLink>}</nav>
-      <div className="header-actions">{user ? <><span className="user-name">{user.display_name}</span><button className="button outline small" onClick={logout}>Выйти</button></> : <button className="button outline small" onClick={() => setAuthOpen(true)}>Войти <span>↗</span></button>}</div>
+      <div className="header-actions">{user ? <><Link className="user-name" to="/account"><span className="user-name-display">{user.display_name} · </span>Кабинет</Link><button className="button outline small" onClick={logout}>Выйти</button></> : <button className="button outline small" onClick={() => setAuthOpen(true)}>Войти <span>↗</span></button>}</div>
     </header>
     <main id="main-content">{children}</main>
     <footer className="site-footer"><span>© Корпоративная крыса</span></footer>
@@ -132,7 +133,6 @@ function Training() {
   const missions = useResource('training', signal => api.missions('method_training', signal));
   return <><section className="training-banner section-wrap"><div><span className="eyebrow">Один на один</span><h1>Тренировка</h1><p>В каждой тренировке вы разговариваете с одним собеседником. Выбирайте ситуацию и пробуйте новые решения.</p></div><img src="/images/office-training-scene.png" alt="Собеседница в переговорной" /></section>
     <section className="section-wrap custom-entry"><div><span className="eyebrow">Ваш сценарий</span><h2>Разговор на ваших условиях</h2><p>Опишите ситуацию, задайте цель и характер собеседника. После этого можно сразу начать диалог.</p></div><Link className="button primary" to="/training/custom">Создать свой диалог <span>↗</span></Link></section>
-    <SavedDialogs />
     <section className="section-wrap content-section"><div className="content-toolbar"><div><span className="eyebrow">Каталог тренировок</span><h2>Выберите сценарий</h2></div><span className="pill">{missions.data?.length ?? 0} доступно</span></div>
       <ResourceView resource={missions} empty="Опубликованных тренировок пока нет. Как только появятся сценарии, они будут показаны здесь.">{items => <div className="list-grid">{items.map((mission: Mission) => <Link className="list-card" to={`/training/mission/${mission.id}`} key={mission.id}><div><span className="eyebrow">{mission.interaction_type === 'single_choice' ? 'Выбор ответа' : 'Диалог'}</span><h3>{mission.title}</h3><p>Откройте сценарий и настройте разговор.</p></div><span className="round-arrow">↗</span></Link>)}</div>}</ResourceView>
     </section></>;
@@ -148,10 +148,26 @@ function Story() {
 
 function StoryDetailPage() {
   const { id = '' } = useParams();
+  const { user } = useAuth();
   const resource = useResource(`story-${id}`, signal => api.storyline(id, signal));
+  const [progress, setProgress] = useState<StoryProgress | null>(null);
+  useEffect(() => {
+    const token = sessionStorage.getItem('arena_token');
+    if (!token || !user) { setProgress(null); return; }
+    const controller = new AbortController();
+    api.storyProgress(token, id, controller.signal).then(setProgress).catch(() => setProgress(null));
+    return () => controller.abort();
+  }, [id, user?.id]);
   return <><PageIntro eyebrow="Карта сюжета" title={resource.data?.title || 'Сюжетная линия'} text={resource.data?.description || 'Изучаем доступные миссии и порядок прохождения.'} back="/story" />
-    <section className="section-wrap content-section"><ResourceView resource={resource} empty="Сюжет не найден.">{(story: StorylineDetail) => <><div className="content-toolbar"><h2>Миссии</h2><span className="pill">{story.missions.length} этапов</span></div>
-      {story.missions.length ? <div className="mission-timeline">{story.missions.map((mission, index) => <Link className="timeline-item" to={`/story/mission/${mission.id}`} key={mission.id}><span className="timeline-node">{index + 1}</span><div><span className="eyebrow">{mission.branch_key || 'Этап'}</span><h3>{mission.title}</h3><p>Открыть сцену и начать разговор</p></div><span className="round-arrow">↗</span></Link>)}</div> : <div className="notice">В этой линии пока нет опубликованных миссий.</div>}</>}</ResourceView></section></>;
+    <section className="section-wrap content-section"><ResourceView resource={resource} empty="Сюжет не найден.">{(story: StorylineDetail) => <><div className="content-toolbar"><h2>Миссии</h2><span className="pill">Миссий: {story.missions.length}</span></div>
+      {story.missions.length ? <div className="mission-timeline">{story.missions.map((mission, index) => {
+        const firstInBranch = !story.missions.slice(0, index).some(previous => previous.branch_key === mission.branch_key);
+        const state = progress?.missions.find(item => item.mission_id === mission.id);
+        const unlocked = state?.unlocked ?? firstInBranch;
+        const content = <><span className="timeline-node">{index + 1}</span><div><span className="eyebrow">{mission.branch_key === 'main' ? 'Основная линия' : mission.branch_key || 'Этап'} · {state?.completed ? 'Пройдено' : unlocked ? 'Доступно' : 'Закрыто'}</span><h3>{mission.title}</h3><p>{state?.completed ? 'Можно пройти ещё раз' : unlocked ? 'Открыть сцену и начать разговор' : 'Пройдите предыдущую миссию этой ветки'}</p></div><span className="round-arrow">{unlocked ? '↗' : '—'}</span></>;
+        return unlocked ? <Link className="timeline-item" to={`/story/mission/${mission.id}`} key={mission.id}>{content}</Link>
+          : <div className="timeline-item locked" key={mission.id} aria-label={`${mission.title} — закрыто`}>{content}</div>;
+      })}</div> : <div className="notice">В этой линии пока нет опубликованных миссий.</div>}</>}</ResourceView></section></>;
 }
 
 function Knowledge() {
@@ -193,6 +209,7 @@ export default function App() {
     <Route path="/knowledge" element={<Knowledge />} />
     <Route path="/knowledge/:id" element={<KnowledgeDetailPage />} />
     <Route path="/admin" element={<AdminPage />} />
+    <Route path="/account" element={<AccountPage />} />
     <Route path="*" element={<section className="section-wrap not-found"><span className="eyebrow">404 / Не найдено</span><h1>Похоже, здесь пока пусто.</h1><Link className="button primary" to="/">На главную <span>↗</span></Link></section>} />
   </Routes></Shell>;
 }

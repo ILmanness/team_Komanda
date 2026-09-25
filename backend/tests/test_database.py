@@ -1,4 +1,5 @@
 """Run with RUN_DB_TESTS=1. Only a uniquely named test schema is removed."""
+import asyncio
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -21,6 +22,7 @@ from app.game import service as game_service
 from app.main import app
 from app.sessions import router as sessions_router
 from app.sessions import websocket as sessions_websocket
+from app.users import router as users_router
 
 pytestmark = pytest.mark.skipif(os.getenv('RUN_DB_TESTS') != '1', reason='Requires PostgreSQL')
 
@@ -145,6 +147,82 @@ def test_game_custom_session_websocket_round_trip(database, monkeypatch):
     assert [message['role'] for message in messages.json()['messages']] == ['user', 'assistant']
     finished = client.post(f'/api/v1/sessions/{session_id}/finish', headers=headers)
     assert finished.status_code == 200 and finished.json()['status'] == 'completed'
+    assert finished.json()['final_result']['result'] == 'failure'
+
+
+def test_story_unlock_requires_success_and_manual_finish_does_not_unlock(database, monkeypatch):
+    for module in (auth_dependencies, catalog_router, sessions_router, users_router, game_service):
+        monkeypatch.setattr(module, 'engine', database)
+    with database.begin() as connection:
+        user_id = connection.execute(text("INSERT INTO users(display_name) VALUES ('Player') RETURNING id")).scalar_one()
+        storyline_id = connection.execute(text('''
+            INSERT INTO storylines(slug, title, status) VALUES ('demo', 'Demo', 'published') RETURNING id
+        ''')).scalar_one()
+        character_id = connection.execute(text('''
+            INSERT INTO characters(slug, name) VALUES ('anna', 'Anna') RETURNING id
+        ''')).scalar_one()
+        paei_id = connection.execute(text('''
+            INSERT INTO paei_profiles(code, leading_letter, p_value, a_value, e_value, i_value)
+            VALUES ('TEST', 'P', 50, 50, 50, 50) RETURNING id
+        ''')).scalar_one()
+        difficulty_id = connection.execute(text('''
+            INSERT INTO difficulty_profiles(code, title) VALUES ('TEST', 'Test') RETURNING id
+        ''')).scalar_one()
+        mission_ids = []
+        for order in (1, 2):
+            mission_ids.append(connection.execute(text('''
+                INSERT INTO missions(storyline_id, character_id, mission_type, interaction_type,
+                                     branch_key, order_index, title, task, status)
+                VALUES (:storyline, :character, 'story', 'ai_dialogue', 'main', :order,
+                        :title, 'Discuss deadline', 'published') RETURNING id
+            '''), {'storyline': storyline_id, 'character': character_id,
+                   'order': order, 'title': f'Mission {order}'}).scalar_one())
+    token = create_access_token(user_id)
+    headers = {'Authorization': f'Bearer {token}'}
+    client = TestClient(app)
+    progress_url = f'/api/v1/storylines/{storyline_id}/progress'
+    progress = client.get(progress_url, headers=headers)
+    assert progress.status_code == 200
+    assert [(item['unlocked'], item['completed']) for item in progress.json()['missions']] == [
+        (True, False), (False, False),
+    ]
+    def request(mission_id):
+        return client.post('/api/v1/sessions', headers=headers, json={
+            'mode': 'story', 'mission_id': str(mission_id),
+            'paei_profile_id': str(paei_id), 'difficulty_profile_id': str(difficulty_id),
+        })
+    assert request(mission_ids[1]).status_code == 403
+    first = request(mission_ids[0])
+    assert first.status_code == 201, first.text
+    finished = client.post(f"/api/v1/sessions/{first.json()['id']}/finish", headers=headers)
+    assert finished.json()['final_result']['result'] == 'failure'
+    assert request(mission_ids[1]).status_code == 403
+    second_attempt = request(mission_ids[0])
+    turn = asyncio.run(game_service.GameService().process_player_message(
+        session_id=second_attempt.json()['id'], user_id=user_id,
+        content='Давайте найдём решение.', idempotency_key=uuid4(),
+        evaluation_override={'intent': 'proposal', 'quality': 1, 'critical_error': False,
+                             'effects': {'contact': 3, 'tension': -3, 'progress': 100}},
+        response_override='Согласна, это поможет.',
+    ))
+    assert turn['events'][-1]['final_result']['result'] == 'success'
+    progress = client.get(progress_url, headers=headers).json()['missions']
+    assert [(item['unlocked'], item['completed']) for item in progress] == [
+        (True, True), (True, False),
+    ]
+    assert request(mission_ids[1]).status_code == 201
+    with database.begin() as connection:
+        connection.execute(text('''
+            UPDATE game_sessions SET started_at=now() - interval '32 days',
+                                     completed_at=now() - interval '31 days'
+            WHERE id=:id
+        '''), {'id': second_attempt.json()['id']})
+    retention.cleanup(apply=True)
+    assert client.get(progress_url, headers=headers).json()['missions'][1]['unlocked'] is True
+    stats = client.get('/api/v1/users/me/stats', headers=headers)
+    assert stats.status_code == 200 and stats.json()['story_successes'] == 1
+    updated = client.patch('/api/v1/users/me', headers=headers, json={'display_name': 'New Player'})
+    assert updated.status_code == 200 and updated.json()['display_name'] == 'New Player'
 
 
 def test_registration_has_login_and_display_name(database, monkeypatch):

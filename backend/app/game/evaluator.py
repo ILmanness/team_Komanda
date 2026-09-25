@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 from app.ai import complete
+from app.config import get_settings
 
 
 class Evaluator:
@@ -16,6 +17,9 @@ class Evaluator:
         """
         Анализирует сообщение игрока через LLM.
         """
+
+        if get_settings().ai_provider == 'mock':
+            return self._mock_evaluation(player_message)
 
         prompt = self._build_prompt(
             context=context,
@@ -113,7 +117,7 @@ effects:
 предполагаемые изменения:
 contact от -3 до +3
 tension от -3 до +3
-progress от -3 до +3
+progress от -12 до +12
 """
 
     def _parse_response(self, response: Any) -> dict[str, Any]:
@@ -181,8 +185,8 @@ progress от -3 до +3
 
         progress = self._clamp_int(
             effects.get("progress", 0),
-            -3,
-            3,
+            -12,
+            12,
         )
 
         return {
@@ -200,6 +204,29 @@ progress от -3 до +3
                 "progress": progress,
             },
         }
+
+    @staticmethod
+    def _mock_evaluation(message: str) -> dict[str, Any]:
+        """Predictable local demo rules; never used with an AI provider."""
+        lower = message.casefold()
+        hostile = any(word in lower for word in ('дурак', 'заткни', 'идиот', 'уволю', 'угрожаю'))
+        constructive = len(message.strip()) >= 20 and any(
+            word in lower for word in (
+                'давайте', 'предлагаю', 'можем', 'соглас', 'понима', 'обсуд', 'решени',
+                'какие', 'как ', 'что ', 'почему', 'важно', 'помог',
+            )
+        )
+        if hostile:
+            return {'intent': 'refusal', 'quality': 0.1, 'critical_error': False,
+                    'reason': 'Демонстрационная оценка: агрессивная реплика.',
+                    'effects': {'contact': -2, 'tension': 3, 'progress': 0}}
+        if constructive:
+            return {'intent': 'negotiation', 'quality': 0.8, 'critical_error': False,
+                    'reason': 'Демонстрационная оценка: конструктивная реплика.',
+                    'effects': {'contact': 2, 'tension': -1, 'progress': 12}}
+        return {'intent': 'unknown', 'quality': 0.4, 'critical_error': False,
+                'reason': 'Демонстрационная оценка: требуется более конкретный ответ.',
+                'effects': {'contact': 0, 'tension': 0, 'progress': 2}}
 
     @staticmethod
     def _clamp_int(

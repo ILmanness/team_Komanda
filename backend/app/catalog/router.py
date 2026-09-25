@@ -1,9 +1,12 @@
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 
+from app.auth.dependencies import get_current_user
 from app.db import engine
+from app.story_progress import get_story_progress
 
 from .schemas import (
     GameOptions,
@@ -130,6 +133,17 @@ def get_storyline(
     })
 
     return item
+
+
+@router.get('/storylines/{storyline_id}/progress')
+def storyline_progress(storyline_id: UUID, current_user: Annotated[dict, Depends(get_current_user)]):
+    with engine.connect() as connection:
+        exists = connection.execute(text('''
+            SELECT 1 FROM storylines WHERE id=:id AND status='published'
+        '''), {'id': storyline_id}).scalar_one_or_none()
+        if exists is None:
+            raise HTTPException(status_code=404, detail='Storyline not found')
+        return {'missions': get_story_progress(connection, storyline_id, current_user['id'])}
 
 
 @router.get(
