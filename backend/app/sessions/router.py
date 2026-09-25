@@ -482,13 +482,7 @@ def get_session_messages(
                     sequence_number,
                     role,
                     content,
-                    payload,
-                    evaluation,
                     processing_status,
-                    reply_to_message_id,
-                    error_code,
-                    model,
-                    token_count,
                     created_at
                 FROM session_messages
                 WHERE session_id = :session_id

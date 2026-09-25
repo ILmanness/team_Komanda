@@ -1,11 +1,12 @@
 import json
 from typing import Any
 
-from app.ai import complete
+from app.ai import LLMProvider, get_provider
 
 
 class Evaluator:
-
+    def __init__(self, provider: LLMProvider | None = None) -> None:
+        self.provider = provider if provider is not None else get_provider()
 
     async def evaluate(
         self,
@@ -22,7 +23,7 @@ class Evaluator:
             player_message=player_message,
         )
 
-        response = await complete([{"role": "system", "content": prompt}])
+        response = await self.provider.generate([{"role": "system", "content": prompt}])
 
         return self._parse_response(response)
 

@@ -77,18 +77,7 @@ class SessionMessageResponse(BaseModel):
     role: str
     content: str
 
-    payload: dict[str, Any]
-    evaluation: dict[str, Any] | None = None
-
     processing_status: str
-
-    reply_to_message_id: UUID | None = None
-
-    error_code: str | None = None
-
-    model: str | None = None
-    token_count: int | None = None
-
     created_at: datetime
 
 
