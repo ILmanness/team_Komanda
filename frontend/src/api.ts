@@ -84,7 +84,7 @@ export type AccountStats = {
   story_successes: number; trainings: number;
 };
 
-export type GameMessage = { id: string; sequence_number: number; role: 'user' | 'assistant' | 'system'; content: string; payload: { emotion?: string }; processing_status: string };
+export type GameMessage = { id: string; sequence_number: number; role: 'user' | 'assistant' | 'system'; content: string; emotion?: 'neutral' | 'warm' | 'tense' | 'angry'; processing_status: string };
 
 export type CharacterOption = { id: string; name: string; role_title: string; description: string };
 export type GameOptions = {

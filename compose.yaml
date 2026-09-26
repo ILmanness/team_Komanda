@@ -8,6 +8,7 @@ x-backend: &backend
     POSTGRES_PORT: 5432
   volumes:
     - ./backend:/app
+    - ./content:/content:ro
   init: true
 
 services:

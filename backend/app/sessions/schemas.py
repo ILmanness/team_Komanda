@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -77,19 +77,9 @@ class SessionMessageResponse(BaseModel):
 
     role: str
     content: str
-
-    payload: dict[str, Any]
-    evaluation: dict[str, Any] | None = None
+    emotion: Literal['neutral', 'warm', 'tense', 'angry'] = 'neutral'
 
     processing_status: str
-
-    reply_to_message_id: UUID | None = None
-
-    error_code: str | None = None
-
-    model: str | None = None
-    token_count: int | None = None
-
     created_at: datetime
 
 

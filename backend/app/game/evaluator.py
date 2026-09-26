@@ -1,12 +1,12 @@
 import json
 from typing import Any
 
-from app.ai import complete
-from app.config import get_settings
+from app.ai import LLMProvider, MockLLMProvider, get_provider
 
 
 class Evaluator:
-
+    def __init__(self, provider: LLMProvider | None = None) -> None:
+        self.provider = provider if provider is not None else get_provider()
 
     async def evaluate(
         self,
@@ -18,7 +18,7 @@ class Evaluator:
         Анализирует сообщение игрока через LLM.
         """
 
-        if get_settings().ai_provider == 'mock':
+        if isinstance(self.provider, MockLLMProvider) and self.provider.demo_evaluation:
             return self._mock_evaluation(player_message)
 
         prompt = self._build_prompt(
@@ -26,7 +26,7 @@ class Evaluator:
             player_message=player_message,
         )
 
-        response = await complete([{"role": "system", "content": prompt}])
+        response = await self.provider.generate([{"role": "system", "content": prompt}])
 
         return self._parse_response(response)
 

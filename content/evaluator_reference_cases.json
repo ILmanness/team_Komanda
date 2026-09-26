@@ -1,0 +1,165 @@
+{
+  "schema_version": "0.1-draft",
+  "review_status": "pending_poliy01",
+  "rules_source": "docs/scoring_and_game_state.md, sections 10.1, 11.3 and 21.6 (DRAFT)",
+  "scenario": {
+    "id": "fixture_scope_deadline",
+    "purpose": "Изолированный тестовый контекст; не является опубликованным уровнем",
+    "briefing": "Игрок обсуждает с руководителем объём первого релиза и срок. Цель — согласовать реалистичный план без обхода обязательной проверки.",
+    "facts": [
+      "Обязательная проверка качества должна пройти до выпуска.",
+      "Игрок не уполномочен обещать дополнительный бюджет.",
+      "Точные приоритеты руководителя в начале беседы неизвестны."
+    ],
+    "default_state_before": {
+      "contact": 70,
+      "resistance": 40,
+      "progress": 30,
+      "critical_errors": 0,
+      "game_status": "active"
+    }
+  },
+  "cases": [
+    {
+      "id": "strong_constructive_p",
+      "tags": ["strong", "argumentation", "alternative"],
+      "input": {
+        "npc_profile": "P_dominant",
+        "phase": "bargaining",
+        "player_message": "К пятнице подготовим работающий первый релиз. Сегодня согласуем критичный объём, завтра покажем промежуточный результат; если весь объём не поместится, перенесём второстепенные функции."
+      },
+      "expected": {
+        "required": {"observation_codes": ["result_clarity", "deadline_clarity", "alternative_present"], "critical_flags": []},
+        "allowed": {"action_types": ["strong_positive", "positive"], "profile_fit": {"P": [1, 2], "A": [0, 2], "E": [-1, 2], "I": [-1, 2]}},
+        "state_delta_by_action": {"strong_positive": {"contact": 8, "resistance": -8, "progress": 12, "quality": 12, "critical_errors": 0}, "positive": {"contact": 5, "resistance": -5, "progress": 8, "quality": 8, "critical_errors": 0}},
+        "review_note": "Сильное действие зависит от подтверждения достаточной конкретности и PAEI fit."
+      }
+    },
+    {
+      "id": "weak_vague_answer",
+      "tags": ["weak"],
+      "input": {"npc_profile": "P_dominant", "phase": "diagnosis", "player_message": "Постараемся что-нибудь сделать, потом сообщим."},
+      "expected": {
+        "required": {"observation_codes": ["specificity"], "critical_flags": []},
+        "allowed": {"action_types": ["negative", "neutral"], "profile_fit": {"P": [-2, 0], "A": [-2, 1], "E": [-2, 1], "I": [-2, 1]}},
+        "state_delta_by_action": {"negative": {"contact": -6, "resistance": 6, "progress": 0, "quality": -7, "critical_errors": 0}, "neutral": {"contact": 0, "resistance": 0, "progress": 2, "quality": 0, "critical_errors": 0}},
+        "review_note": "Граница neutral/negative требует методического решения о влиянии уклончивости."
+      }
+    },
+    {
+      "id": "clarify_priority",
+      "tags": ["clarification", "interest_discovery"],
+      "input": {"npc_profile": "P_dominant", "phase": "diagnosis", "player_message": "Что для вас важнее к пятнице: работающая интеграция или полный интерфейс?"},
+      "expected": {
+        "required": {"observation_codes": ["priority_clarity"], "critical_flags": []},
+        "allowed": {"action_types": ["positive", "neutral"], "profile_fit": {"P": [0, 2], "A": [-1, 2], "E": [-1, 2], "I": [0, 2]}},
+        "state_delta_by_action": {"positive": {"contact": 5, "resistance": -5, "progress": 8, "quality": 8, "critical_errors": 0}, "neutral": {"contact": 0, "resistance": 0, "progress": 2, "quality": 0, "critical_errors": 0}},
+        "review_note": "Хорошее уточнение, но пока нет согласованного плана."
+      }
+    },
+    {
+      "id": "discover_underlying_interest",
+      "tags": ["interest_discovery"],
+      "input": {"npc_profile": "I_dominant", "phase": "diagnosis", "player_message": "Я вижу, что срок для вас важен. Какой риск для команды вы хотите снять первым, чтобы мы согласовали приемлемый план?"},
+      "expected": {
+        "required": {"observation_codes": ["interest_question"], "critical_flags": []},
+        "allowed": {"action_types": ["positive", "neutral"], "profile_fit": {"P": [-1, 2], "A": [-1, 2], "E": [-1, 2], "I": [1, 2]}},
+        "state_delta_by_action": {"positive": {"contact": 5, "resistance": -5, "progress": 8, "quality": 8, "critical_errors": 0}, "neutral": {"contact": 0, "resistance": 0, "progress": 2, "quality": 0, "critical_errors": 0}},
+        "review_note": "Вопрос про интерес и признание значимости срока; точный класс требует проверки."
+      }
+    },
+    {
+      "id": "argument_with_evidence",
+      "tags": ["argumentation"],
+      "input": {"npc_profile": "A_dominant", "phase": "bargaining", "player_message": "Проверка качества занимает два дня по прошлым релизам. Если уберём её, возрастёт риск ошибок; предлагаю сократить объём первого выпуска и сохранить проверку."},
+      "expected": {
+        "required": {"observation_codes": ["result_impact_explained", "alternative_present"], "critical_flags": []},
+        "allowed": {"action_types": ["strong_positive", "positive"], "profile_fit": {"P": [0, 2], "A": [1, 2], "E": [-1, 2], "I": [-1, 2]}},
+        "state_delta_by_action": {"strong_positive": {"contact": 8, "resistance": -8, "progress": 12, "quality": 12, "critical_errors": 0}, "positive": {"contact": 5, "resistance": -5, "progress": 8, "quality": 8, "critical_errors": 0}},
+        "review_note": "Фраза о прошлых релизах служит аргументом игрока, а не подтверждённым фактом сценария."
+      }
+    },
+    {
+      "id": "pressure_without_threat",
+      "tags": ["pressure", "boundary"],
+      "input": {"npc_profile": "I_dominant", "phase": "bargaining", "player_message": "Мне нужен ваш ответ сегодня, иначе мы не успеем согласовать объём к пятнице."},
+      "expected": {
+        "required": {"observation_codes": ["deadline_clarity"], "critical_flags": []},
+        "allowed": {"action_types": ["neutral", "negative"], "profile_fit": {"P": [-1, 2], "A": [-1, 2], "E": [-2, 1], "I": [-2, 0]}},
+        "state_delta_by_action": {"neutral": {"contact": 0, "resistance": 0, "progress": 2, "quality": 0, "critical_errors": 0}, "negative": {"contact": -6, "resistance": 6, "progress": 0, "quality": -7, "critical_errors": 0}},
+        "review_note": "Срочность сама по себе не считается угрозой."
+      }
+    },
+    {
+      "id": "premature_proposal",
+      "tags": ["premature_proposal", "boundary"],
+      "input": {"npc_profile": "P_dominant", "phase": "opening", "player_message": "Давайте сразу уберём половину функций из первого релиза."},
+      "expected": {
+        "required": {"observation_codes": ["proposal_before_interest"], "critical_flags": []},
+        "allowed": {"action_types": ["negative", "neutral"], "profile_fit": {"P": [-1, 1], "A": [-2, 1], "E": [-1, 2], "I": [-2, 0]}},
+        "state_delta_by_action": {"negative": {"contact": -6, "resistance": 6, "progress": 0, "quality": -7, "critical_errors": 0}, "neutral": {"contact": 0, "resistance": 0, "progress": 2, "quality": 0, "critical_errors": 0}},
+        "review_note": "До выяснения приоритетов предложение может быть преждевременным; класс требует утверждения."
+      }
+    },
+    {
+      "id": "confirm_agreement",
+      "tags": ["agreement", "strong"],
+      "input": {"npc_profile": "A_dominant", "phase": "closing", "player_message": "Фиксирую договорённость: к пятнице выпускаем интеграцию, проверку качества не пропускаем, я сегодня пришлю план с ответственными. Верно?"},
+      "expected": {
+        "required": {"observation_codes": ["result_clarity", "deadline_clarity", "ownership"], "critical_flags": []},
+        "allowed": {"action_types": ["strong_positive", "positive"], "profile_fit": {"P": [1, 2], "A": [1, 2], "E": [-1, 2], "I": [0, 2]}},
+        "state_delta_by_action": {"strong_positive": {"contact": 8, "resistance": -8, "progress": 12, "quality": 12, "critical_errors": 0}, "positive": {"contact": 5, "resistance": -5, "progress": 8, "quality": 8, "critical_errors": 0}},
+        "review_note": "Проверка понимания договорённости завершает ход, но не завершает автоматически всю игру."
+      }
+    },
+    {
+      "id": "critical_personal_attack",
+      "tags": ["critical_error", "pressure"],
+      "input": {"npc_profile": "I_dominant", "phase": "bargaining", "player_message": "Вы некомпетентны и ничего не понимаете в этой задаче."},
+      "expected": {
+        "required": {"observation_codes": ["personal_attack"], "critical_flags": ["PERSONAL_ATTACK"]},
+        "allowed": {"action_types": ["critical_error"], "profile_fit": {"P": [-2, 0], "A": [-2, 0], "E": [-2, 0], "I": [-2, -1]}},
+        "state_delta_by_action": {"critical_error": {"contact": -15, "resistance": 12, "progress": -5, "quality": -15, "critical_errors": 1}},
+        "review_note": "Прямое личное оскорбление, а не просто жёсткая позиция."
+      }
+    },
+    {
+      "id": "critical_unauthorized_budget",
+      "tags": ["critical_error", "scenario_constraint"],
+      "input": {"npc_profile": "P_dominant", "phase": "bargaining", "player_message": "Я гарантирую дополнительный бюджет на этот релиз."},
+      "expected": {
+        "required": {"observation_codes": ["unauthorized_commitment"], "critical_flags": ["UNAUTHORIZED_COMMITMENT"]},
+        "allowed": {"action_types": ["critical_error"], "profile_fit": {"P": [-2, 2], "A": [-2, 1], "E": [-2, 2], "I": [-2, 2]}},
+        "state_delta_by_action": {"critical_error": {"contact": -15, "resistance": 12, "progress": -5, "quality": -15, "critical_errors": 1}},
+        "review_note": "Критический флаг опирается на явное ограничение в тестовом контексте."
+      }
+    },
+    {
+      "id": "ambiguous_priority_question",
+      "tags": ["boundary", "ambiguous", "clarification"],
+      "input": {"npc_profile": "P_dominant", "phase": "opening", "player_message": "А что вам нужно?"},
+      "expected": {
+        "required": {"observation_codes": ["interest_question"], "critical_flags": []},
+        "allowed": {"action_types": ["neutral", "positive"], "profile_fit": {"P": [-1, 1], "A": [-1, 1], "E": [-1, 1], "I": [-1, 2]}},
+        "state_delta_by_action": {"neutral": {"contact": 0, "resistance": 0, "progress": 2, "quality": 0, "critical_errors": 0}, "positive": {"contact": 5, "resistance": -5, "progress": 8, "quality": 8, "critical_errors": 0}},
+        "review_note": "Вопрос выясняет интерес, но не указывает предмет и срок."
+      }
+    },
+    {
+      "id": "recovery_after_contact_loss",
+      "tags": ["recovery", "boundary"],
+      "input": {
+        "npc_profile": "I_dominant",
+        "phase": "bargaining",
+        "state_before": {"contact": 18, "resistance": 75, "progress": 20, "critical_errors": 0, "game_status": "contact_lost"},
+        "player_message": "Я был резок, извините. Вижу, что важно не подвести команду. Давайте сначала уточним главный риск, а затем вместе выберем безопасный объём релиза."
+      },
+      "expected": {
+        "required": {"observation_codes": ["acknowledgement", "interest_question"], "critical_flags": []},
+        "allowed": {"action_types": ["recovery_action"], "profile_fit": {"P": [-1, 2], "A": [-1, 2], "E": [-1, 2], "I": [1, 2]}},
+        "state_delta_by_action": {"recovery_action": {"contact": 15, "resistance": -10, "progress": 5, "quality": 5, "critical_errors": 0}},
+        "review_note": "Для recovery нужны дополнительные условия состояния; окончательный класс требует решения METH-08."
+      }
+    }
+  ]
+}

@@ -20,7 +20,7 @@ function NovelStage({ messages, name, playerName }: { messages: GameMessage[]; n
   useEffect(() => { setPage(Math.max(0, visible.length - 1)); }, [visible.length]);
   const current = visible[page];
   const speaking = current?.role === 'user' ? 'player' : 'opponent';
-  const emotion = current?.role === 'assistant' ? current.payload?.emotion || 'neutral' : 'neutral';
+  const emotion = current?.role === 'assistant' ? current.emotion || 'neutral' : 'neutral';
   return <section className="novel-stage" data-speaking={speaking} data-emotion={emotion} aria-label="Сцена разговора">
     <div className="novel-scenery" aria-hidden="true" />
     <div className="novel-opponent" aria-label={`Собеседник ${name}`}><div className="novel-silhouette"><span className="novel-silhouette-head" /><span className="novel-silhouette-body" /></div><span className="novel-character-caption">{name}</span></div>

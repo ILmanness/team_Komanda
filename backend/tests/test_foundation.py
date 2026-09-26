@@ -37,8 +37,7 @@ def test_mock_ai(monkeypatch):
 
 
 def test_mock_story_can_succeed_but_short_answers_do_not(monkeypatch):
-    from app.game import evaluator as evaluator_module
-    monkeypatch.setattr(evaluator_module, 'get_settings', lambda: Settings(_env_file=None, ai_provider='mock'))
+    monkeypatch.setattr(ai, 'get_settings', lambda: Settings(_env_file=None, ai_provider='mock'))
     evaluator = Evaluator()
     engine = GameEngine()
     state = {'turn': 0, 'contact': 0, 'tension': 0, 'progress': 0, 'critical_errors': 0}

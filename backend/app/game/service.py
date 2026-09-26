@@ -6,7 +6,7 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 from sqlalchemy import text
 
-from app.ai import complete
+from app.ai import LLMProvider, get_provider
 from app.db import engine
 from app.game.context_builder import ContextBuilder
 from app.game.evaluator import Evaluator
@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 class GameService:
     """Application service for one complete player turn."""
 
-    def __init__(self) -> None:
+    def __init__(self, provider: LLMProvider | None = None) -> None:
+        self.provider = provider if provider is not None else get_provider()
         self.context_builder = ContextBuilder()
-        self.evaluator = Evaluator()
+        self.evaluator = Evaluator(provider=self.provider)
         self.game_engine = GameEngine()
         self.scoring = Scoring()
 
@@ -104,6 +105,7 @@ class GameService:
                 character=config_snapshot.get("character") or {},
                 paei_profile=config_snapshot.get("paei") or {},
                 difficulty_profile=config_snapshot.get("difficulty") or {},
+                rules=config_snapshot.get("rules") or {},
                 messages=recent_messages,
                 memory_summary=self._memory_to_text(
                     memory_summary
@@ -188,16 +190,25 @@ class GameService:
             return {"events": events}
 
         try:
+            opponent_game_context = {
+                **game_context,
+                "session": {**game_context["session"], "status": new_status},
+                "state": updated_session["state"],
+            }
             opponent_messages = self._build_opponent_messages(
-                config_snapshot=config_snapshot,
-                state=updated_session["state"],
-                memory_summary=memory_summary,
-                recent_messages=recent_messages,
+                context=self.context_builder.build_opponent_context(
+                    game_context=opponent_game_context,
+                    evaluation=evaluation,
+                ),
                 player_message=content,
                 final=final_result is not None,
             )
 
-            opponent_response = response_override or await complete(opponent_messages)
+            opponent_response = (
+                response_override
+                if response_override is not None
+                else await self.provider.generate(opponent_messages)
+            )
             emotion = self._opponent_emotion(evaluation, updated_session['state'])
 
             assistant_message = self._save_opponent_response(
@@ -505,22 +516,9 @@ class GameService:
         player_message: str,
     ) -> dict[str, Any]:
 
-        prompt = self.evaluator._build_prompt(
+        return await self.evaluator.evaluate(
             context=context,
             player_message=player_message,
-        )
-
-        response = await complete(
-            [
-                {
-                    "role": "system",
-                    "content": prompt,
-                }
-            ]
-        )
-
-        return self.evaluator._parse_response(
-            response
         )
 
     def _apply_evaluation(
@@ -814,10 +812,7 @@ class GameService:
     @staticmethod
     def _build_opponent_messages(
         *,
-        config_snapshot: dict[str, Any],
-        state: dict[str, Any],
-        memory_summary: Any,
-        recent_messages: list[dict[str, str]],
+        context: dict[str, Any],
         player_message: str,
         final: bool,
     ) -> list[dict[str, str]]:
@@ -836,6 +831,12 @@ class GameService:
                 "персонажа без изменения результата игры."
             )
 
+        game_context = context["game"]
+        bounded_history = game_context["history"]
+        private_context = {
+            key: value for key, value in game_context.items() if key != "history"
+        }
+
         return [
             {
                 "role": "system",
@@ -845,15 +846,15 @@ class GameService:
                 "role": "system",
                 "content": json.dumps(
                     {
-                        "config": config_snapshot,
-                        "state": state,
-                        "memory": memory_summary,
+                        "game": private_context,
+                        "evaluation": context["evaluation"],
                     },
                     ensure_ascii=False,
                     default=str,
+                    sort_keys=True,
                 ),
             },
-            *recent_messages,
+            *bounded_history,
             {
                 "role": "user",
                 "content": player_message,
