@@ -87,3 +87,33 @@ class EvaluatorOutput(BaseModel):
         """Reject observations that do not quote the evaluated player message."""
         if any(feature.evidence not in player_message for feature in self.observations.features):
             raise ValueError('observation evidence must quote the player message')
+
+
+TurnIntent = Literal[
+    'greeting', 'question', 'proposal', 'negotiation', 'argument',
+    'clarification', 'agreement', 'refusal', 'unknown',
+]
+
+
+class PAEIMarker(BaseModel):
+    """One observable PAEI signal, anchored to the player's own words."""
+
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+    letter: Literal['P', 'A', 'E', 'I']
+    fragment: str = Field(min_length=1, max_length=500)
+    confidence: float = Field(ge=0, le=1)
+
+
+class TurnEvaluation(EvaluatorOutput):
+    """MVP-10 output; Game Engine alone converts its event into state deltas."""
+
+    schema_version: Literal['ai10-v1']
+    intent: TurnIntent
+    paei_markers: list[PAEIMarker]
+    hint_basis: list[str]
+
+    def validate_evidence(self, player_message: str) -> None:
+        super().validate_evidence(player_message)
+        if any(marker.fragment not in player_message for marker in self.paei_markers):
+            raise ValueError('PAEI marker must quote the player message')

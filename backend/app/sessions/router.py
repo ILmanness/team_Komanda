@@ -8,12 +8,15 @@ from sqlalchemy import text
 from app.auth.dependencies import get_current_user
 from app.config import get_settings
 from app.db import engine
+from app.game.hints import HintGenerator, hint_limit
+from app.game.scoring import Scoring
 from app.story_progress import get_story_progress
 
 from .schemas import (
     CreateSessionRequest,
     CreateSessionResponse,
     FinishSessionResponse,
+    SessionHintResponse,
     SessionListItem,
     SessionMessageResponse,
     SessionMessagesResponse,
@@ -509,6 +512,100 @@ def get_session_messages(
             SessionMessageResponse(**dict(row))
             for row in rows
         ],
+    )
+
+
+@router.post(
+    "/{session_id}/hint",
+    response_model=SessionHintResponse,
+)
+def request_hint(
+    session_id: UUID,
+    current_user: CurrentUser,
+):
+    """Issue one bounded, non-revealing hint for a completed active turn."""
+    with engine.begin() as connection:
+        row = connection.execute(text("""
+            SELECT status, state, config_snapshot
+            FROM game_sessions
+            WHERE id = :session_id AND user_id = :user_id
+            FOR UPDATE
+        """), {'session_id': session_id, 'user_id': current_user['id']}).mappings().first()
+        if row is None:
+            raise HTTPException(status_code=404, detail='Session not found')
+        if row['status'] != 'active':
+            raise HTTPException(status_code=409, detail='Hints are unavailable after the game')
+
+        pending = connection.execute(text("""
+            SELECT EXISTS (
+                SELECT 1 FROM session_messages
+                WHERE session_id = :session_id
+                  AND role = 'user'
+                  AND processing_status = 'pending'
+            )
+        """), {'session_id': session_id}).scalar_one()
+        if pending:
+            raise HTTPException(status_code=409, detail='Wait for the current turn to finish')
+
+        state = dict(row['state'] or {})
+        turn = int(state.get('turn') or 0)
+        if turn < 1:
+            raise HTTPException(status_code=409, detail='Complete a turn before requesting a hint')
+        if state.get('hint_last_turn') == turn:
+            raise HTTPException(status_code=409, detail='Hint already used on this turn')
+
+        snapshot = row['config_snapshot'] or {}
+        difficulty = snapshot.get('difficulty') or {}
+        limit = hint_limit(difficulty.get('code'))
+        used = int(state.get('hints_used') or 0)
+        if used >= limit:
+            raise HTTPException(status_code=409, detail='Hint limit reached')
+
+        evaluation = connection.execute(text("""
+            SELECT evaluation
+            FROM session_messages
+            WHERE session_id = :session_id
+              AND role = 'user'
+              AND processing_status = 'completed'
+            ORDER BY sequence_number DESC
+            LIMIT 1
+        """), {'session_id': session_id}).scalar_one_or_none()
+        if not isinstance(evaluation, dict) or evaluation.get('schema_version') != 'ai10-v1':
+            raise HTTPException(status_code=409, detail='No evaluated turn is available for a hint')
+
+        mission = snapshot.get('mission') or {}
+        hint = HintGenerator().generate(
+            goal=mission.get('task') or '',
+            evaluation=evaluation,
+            state=state,
+            level=min(used + 1, 3),
+        )
+        state['hints_used'] = used + 1
+        state['hint_last_turn'] = turn
+        state['negotiation_quality'] = max(
+            0, int(state.get('negotiation_quality', 50)) - 3,
+        )
+        history = state.get('hint_history')
+        state['hint_history'] = [
+            *(history if isinstance(history, list) else []),
+            {'turn': turn, 'hint_type': hint.hint_type, 'level': hint.level},
+        ]
+        state['score'] = Scoring().calculate(state=state)['score']
+        connection.execute(text("""
+            UPDATE game_sessions
+            SET state = :state, lock_version = lock_version + 1,
+                last_activity_at = now()
+            WHERE id = :session_id AND user_id = :user_id
+        """), {
+            'state': Jsonb(state),
+            'session_id': session_id,
+            'user_id': current_user['id'],
+        })
+
+    return SessionHintResponse(
+        **hint.model_dump(),
+        hints_used=used + 1,
+        remaining=limit - used - 1,
     )
 
 
