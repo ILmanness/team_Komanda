@@ -19,6 +19,10 @@ class CharacterWrite(BaseModel):
     role_title: str = Field(default='', max_length=200)
     description: str = Field(default='', max_length=3000)
     base_prompt: str = Field(default='', max_length=10000)
+    paei_profile_id: UUID | None = None
+    paei_description: str = Field(default='', max_length=3000)
+    behavior_description: str = Field(default='', max_length=3000)
+    portrait_url: str = Field(default='', max_length=2000)
 
 
 class KnowledgeWrite(BaseModel):
@@ -51,6 +55,7 @@ class MissionWrite(BaseModel):
     order_index: int | None = Field(default=None, ge=1, le=32767)
     title: str = Field(min_length=2, max_length=200)
     situation: str = Field(min_length=10, max_length=5000)
+    public_context: str = Field(default='', max_length=5000)
     task: str = Field(min_length=5, max_length=5000)
     opening_message: str = Field(min_length=2, max_length=3000)
     max_turns: int = Field(default=10, ge=1, le=50)
@@ -66,6 +71,8 @@ class MissionWrite(BaseModel):
                 raise ValueError('Сюжет пока поддерживает только свободный диалог')
         elif not self.knowledge_item_id:
             raise ValueError('Для тренировки нужна тема базы знаний')
+        elif self.interaction_type != 'single_choice':
+            raise ValueError('Тренировка использует подготовленные ответы, без AI-диалога')
         if self.interaction_type == 'single_choice':
             if self.mission_type != 'method_training' or len(self.choices) < 2:
                 raise ValueError('Для тренировки с выбором нужны минимум два ответа')

@@ -30,7 +30,9 @@ function BasicEditor({ kind, id, overview, saved }: { kind: BasicKind; id: strin
     const value = (name: string) => String(form.get(name) || '').trim();
     const base = { slug: value('slug'), title: value('title') };
     const body = kind === 'storylines' ? { ...base, description: value('description'), cover_url: value('cover_url') || null }
-      : kind === 'characters' ? { slug: base.slug, name: value('name'), role_title: value('role_title'), description: value('description'), base_prompt: value('base_prompt') }
+      : kind === 'characters' ? { slug: base.slug, name: value('name'), role_title: value('role_title'), description: value('description'), base_prompt: value('base_prompt'),
+        paei_profile_id: value('paei_profile_id') || null, paei_description: value('paei_description'),
+        behavior_description: value('behavior_description'), portrait_url: value('portrait_url') }
         : { ...base, item_type: value('item_type'), summary: value('summary'), body: value('body'), parent_id: value('parent_id') || null };
     setPending(true); setError(''); setNotice('');
     try { const result = await api.adminSave(token, kind, body, id || undefined); saved(result.id); setNotice(id ? 'Изменения сохранены.' : 'Черновик создан.'); }
@@ -50,7 +52,12 @@ function BasicEditor({ kind, id, overview, saved }: { kind: BasicKind; id: strin
         {kind === 'characters' ? <label>Имя персонажа<input name="name" defaultValue={item && 'name' in item ? item.name : ''} required maxLength={160} /></label>
           : <label>Название<input name="title" defaultValue={item && 'title' in item ? item.title : ''} required maxLength={kind === 'storylines' ? 200 : 240} /></label>}</div>
       {kind === 'storylines' && <><label>Описание<textarea name="description" defaultValue={item && 'description' in item ? item.description : ''} rows={4} /></label><label>Ссылка на обложку, если есть<input name="cover_url" defaultValue={item && 'cover_url' in item ? item.cover_url || '' : ''} /></label></>}
-      {kind === 'characters' && <><label>Роль в истории<input name="role_title" defaultValue={item && 'role_title' in item ? item.role_title : ''} /></label><label>Описание<textarea name="description" rows={3} defaultValue={item && 'description' in item ? item.description : ''} /></label><label>Поведение для игрового движка<textarea name="base_prompt" rows={4} defaultValue={item && 'base_prompt' in item ? item.base_prompt : ''} /></label></>}
+      {kind === 'characters' && <><label>Роль в истории<input name="role_title" defaultValue={item && 'role_title' in item ? item.role_title : ''} /></label><label>Описание для игроков<textarea name="description" rows={3} defaultValue={item && 'description' in item ? item.description : ''} /></label>
+        <label>Профиль PAEI<select name="paei_profile_id" defaultValue={item && 'paei_profile_id' in item ? item.paei_profile_id || '' : ''}><option value="">Не назначен</option>{overview.paei_profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.leading_letter} · {profile.code}</option>)}</select></label>
+        <label>Как PAEI проявляется в характере<textarea name="paei_description" rows={3} defaultValue={item && 'paei_description' in item ? item.paei_description : ''} placeholder="Например: просит план и конкретный срок" /></label>
+        <label>Поведение, видимое игроку<textarea name="behavior_description" rows={3} defaultValue={item && 'behavior_description' in item ? item.behavior_description : ''} /></label>
+        <label>Иллюстрация персонажа<input name="portrait_url" defaultValue={item && 'portrait_url' in item ? item.portrait_url : ''} placeholder="/images/anna-frames.png" /></label>
+        <label>Инструкция для игрового движка<textarea name="base_prompt" rows={4} defaultValue={item && 'base_prompt' in item ? item.base_prompt : ''} /></label></>}
       {kind === 'knowledge' && <><div className="admin-fields two"><label>Тип<select name="item_type" defaultValue={item && 'item_type' in item ? item.item_type : 'topic'}><option value="topic">Тема</option><option value="method">Метод</option><option value="article">Статья</option></select></label><label>Родительская тема<select name="parent_id" defaultValue={item && 'parent_id' in item ? item.parent_id || '' : ''}><option value="">Без родителя</option>{overview.knowledge.filter(value => value.id !== id).map(value => <option value={value.id} key={value.id}>{value.title}</option>)}</select></label></div><label>Краткое описание<textarea name="summary" rows={2} defaultValue={item && 'summary' in item ? item.summary : ''} /></label><label>Материал<textarea name="body" rows={5} defaultValue={item && 'body' in item ? item.body : ''} /></label></>}
       {error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="admin-success" role="status">{notice}</p>}
       <div className="admin-form-actions"><button className="button primary" disabled={pending} type="submit">{pending ? 'Сохраняем…' : id ? 'Сохранить изменения' : 'Создать черновик'} <span>→</span></button>
@@ -74,7 +81,7 @@ function MissionEditor({ kind, id, overview, saved }: { kind: 'missions' | 'trai
     setMission(null); setError(''); setNotice('');
     if (!id) { setInteraction(kind === 'training' ? 'single_choice' : 'ai_dialogue'); setChoices([newChoice(1), newChoice(2)]); setHints(['']); return; }
     let active = true;
-    api.adminMission(token, id).then(value => { if (active) { setMission(value); setInteraction(value.interaction_type as 'ai_dialogue' | 'single_choice'); setChoices(value.config.training?.choices || [newChoice(1), newChoice(2)]); setHints(value.config.training?.hints || ['']); } })
+    api.adminMission(token, id).then(value => { if (active) { setMission(value); setInteraction(kind === 'training' ? 'single_choice' : 'ai_dialogue'); setChoices(value.config.training?.choices || [newChoice(1), newChoice(2)]); setHints(value.config.training?.hints || ['']); } })
       .catch(cause => { if (active) setError(textError(cause)); });
     return () => { active = false; };
   }, [id, kind]);
@@ -90,7 +97,7 @@ function MissionEditor({ kind, id, overview, saved }: { kind: 'missions' | 'trai
       knowledge_item_id: kind === 'training' ? value('knowledge_item_id') || null : null,
       character_id: value('character_id'), branch_key: kind === 'missions' ? value('branch_key') : null,
       order_index: kind === 'missions' ? Number(value('order_index')) : null,
-      title: value('title'), situation: value('situation'), task: value('task'),
+      title: value('title'), situation: value('situation'), public_context: value('public_context'), task: value('task'),
       opening_message: value('opening_message'), max_turns: interaction === 'single_choice' ? 1 : Number(value('max_turns')),
       choices: interaction === 'single_choice' ? choices.map(choice => ({ ...choice, id: choice.id.trim(), text: choice.text.trim(), feedback: choice.feedback.trim() })) : [],
       hints: kind === 'training' ? hints.map(hint => hint.trim()).filter(Boolean) : [],
@@ -116,9 +123,10 @@ function MissionEditor({ kind, id, overview, saved }: { kind: 'missions' | 'trai
         <label>Собеседник<select name="character_id" defaultValue={mission?.character_id || ''} required><option value="">Выберите</option>{overview.characters.map(value => <option key={value.id} value={value.id}>{value.name} · {value.role_title}</option>)}</select></label></div>
       {kind === 'missions' && <div className="admin-fields two"><label>Ключ ветки<input name="branch_key" defaultValue={mission?.branch_key || 'main'} required maxLength={80} /></label><label>Порядок<input name="order_index" type="number" min={1} defaultValue={mission?.order_index || 1} required /></label></div>}
       <label>Ситуация<textarea name="situation" defaultValue={mission?.context.situation || ''} required minLength={10} rows={3} placeholder="Что происходит в сцене" /></label>
+      <label>Что известно игроку: факты, возможности и ограничения<textarea name="public_context" defaultValue={mission?.context.public_context || ''} rows={4} placeholder="Например: к сроку готовы два модуля; третий требует проверки. Можно согласовать поэтапный выпуск." /></label>
       <label>Задача игрока<textarea name="task" defaultValue={mission?.task || ''} required minLength={5} rows={2} /></label>
       <label>Первая реплика собеседника<textarea name="opening_message" defaultValue={mission?.context.opening_message || ''} required minLength={2} rows={2} /></label>
-      {kind === 'training' && <label>Формат<select value={interaction} onChange={event => setInteraction(event.target.value as 'ai_dialogue' | 'single_choice')}><option value="single_choice">Выбор ответа</option><option value="ai_dialogue">Свободный диалог</option></select></label>}
+      {kind === 'training' && <p className="form-note">Тренировка работает по подготовленным вариантам, последствиям и подсказкам. AI используется только в сюжете и своём диалоге.</p>}
       {interaction === 'ai_dialogue' && <label>Лимит реплик<input name="max_turns" type="number" min={1} max={50} defaultValue={mission?.config.max_turns || 20} required /></label>}
       {kind === 'training' && <div className="admin-nested"><div className="admin-nested-head"><h3>Подсказки</h3><button type="button" className="button outline small" onClick={() => setHints(values => [...values, ''])} disabled={hints.length >= 5}>Добавить</button></div>{hints.map((hint, index) => <div className="admin-inline" key={index}><input value={hint} maxLength={500} onChange={event => setHints(values => values.map((item, position) => position === index ? event.target.value : item))} placeholder={`Подсказка ${index + 1}`} /><button type="button" onClick={() => setHints(values => values.filter((_, position) => position !== index))} aria-label={`Удалить подсказку ${index + 1}`}>×</button></div>)}</div>}
       {interaction === 'single_choice' && <div className="admin-nested"><div className="admin-nested-head"><div><h3>Варианты ответа</h3><p>Один ответ должен давать минимум 50 прогресса: это условие успеха в короткой тренировке.</p></div><button className="button outline small" type="button" disabled={choices.length >= 12} onClick={() => setChoices(values => [...values, newChoice(values.length + 1)])}>Добавить</button></div>

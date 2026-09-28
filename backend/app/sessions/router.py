@@ -76,9 +76,15 @@ async def _get_session(
     snapshot = data.pop('config_snapshot') or {}
     mission = snapshot.get('mission') or {}
     character = snapshot.get('character') or {}
-    return {**data, "ai_mode": get_settings().ai_provider,
+    return {**data, "ai_mode": 'none' if data['mode'] == 'method_training' else get_settings().ai_provider,
             'mission_title': mission.get('title'), 'mission_task': mission.get('task'),
-            'character_name': character.get('name'), 'character_slug': character.get('slug')}
+            'mission_situation': (mission.get('context') or {}).get('situation'),
+            'mission_public_context': (mission.get('context') or {}).get('public_context'),
+            'character_name': character.get('name'), 'character_slug': character.get('slug'),
+            'character_role_title': character.get('role_title'),
+            'character_description': character.get('description'),
+            'character_paei_description': character.get('paei_description'),
+            'character_behavior_description': character.get('behavior_description')}
 
 
 @router.get("", response_model=list[SessionListItem])
@@ -201,6 +207,10 @@ async def create_session(
                         name,
                         role_title,
                         description,
+                        base_prompt,
+                        paei_profile_id,
+                        paei_description,
+                        behavior_description,
                         behavior
                     FROM characters
                     WHERE id = :id
@@ -277,19 +287,13 @@ async def create_session(
                     detail="Difficulty profile not found",
                 )
 
-        if data.mode in ("story", "method_training"):
+        if data.mode == 'method_training' and mission['interaction_type'] not in ('single_choice', 'guided_training'):
+            raise HTTPException(status_code=400, detail='Training requires authored answers')
 
-            if paei is None and mission['interaction_type'] != 'guided_training':
-                raise HTTPException(
-                    status_code=400,
-                    detail="paei_profile_id is required",
-                )
-
-            if difficulty is None and mission['interaction_type'] != 'guided_training':
-                raise HTTPException(
-                    status_code=400,
-                    detail="difficulty_profile_id is required",
-                )
+        if data.mode == 'story' and character is not None and paei is None and character['paei_profile_id']:
+            paei = (await connection.execute(text('''SELECT id, code, leading_letter, p_value,
+                a_value, e_value, i_value, prompt_rules, behavior FROM paei_profiles WHERE id=:id'''),
+                {'id': character['paei_profile_id']})).mappings().first()
 
         mission_context = {}
 
@@ -347,6 +351,9 @@ async def create_session(
                 "name": character["name"],
                 "role_title": character["role_title"],
                 "description": character["description"],
+                "base_prompt": character["base_prompt"],
+                "paei_description": character["paei_description"],
+                "behavior_description": character["behavior_description"],
                 "behavior": character["behavior"] or {},
             }
 
@@ -425,7 +432,7 @@ async def create_session(
                 "user_id": user_id,
                 "mission_id": data.mission_id,
                 "character_id": character_id,
-                "paei_profile_id": data.paei_profile_id,
+                "paei_profile_id": paei['id'] if paei is not None else None,
                 "difficulty_profile_id": data.difficulty_profile_id,
                 "mode": data.mode,
                 "custom_context": Jsonb(data.custom_context) if data.custom_context is not None else None,

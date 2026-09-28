@@ -59,6 +59,12 @@ class CharacterOption(BaseModel):
     name: str
     role_title: str
     description: str
+    paei_profile_id: UUID | None = None
+    paei_code: str | None = None
+    paei_leading_letter: str | None = None
+    paei_description: str = ''
+    behavior_description: str = ''
+    portrait_url: str = ''
 
 
 class PaeiOption(BaseModel):
@@ -86,6 +92,8 @@ class MissionBriefing(BaseModel):
     interaction_type: str
     title: str
     task: str
+    situation: str = ''
+    public_context: str = ''
     character: CharacterOption | None
     choices: list[dict[str, str]] = Field(default_factory=list)
     hints: list[str] = Field(default_factory=list)

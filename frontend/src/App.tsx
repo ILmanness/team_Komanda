@@ -7,6 +7,7 @@ import { GameDialog, MissionSetup } from './GameSession';
 import GuidedTrainingPage from './GuidedTraining';
 import { AdminPage } from './Admin';
 import { AccountPage } from './AccountPage';
+import { CharactersPage } from './CharactersPage';
 import { KnowledgeLibrary, KnowledgePage, KnowledgeQuizPage } from './KnowledgePages';
 import './styles.css';
 
@@ -96,7 +97,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={{ user, checking: checkingAuth, openAuth: () => setAuthOpen(true), updateUser: setUser }}><div className="app-shell">
     <header className="site-header">
       <Link className="brand" to="/" aria-label="Корпоративная крыса — на главную"><span>КОРПОРАТИВНАЯ<br /><strong>КРЫСА</strong></span></Link>
-      <nav className="main-nav" aria-label="Главная навигация"><NavLink to="/training">Тренировка</NavLink><NavLink to="/story">Сюжет</NavLink><NavLink to="/knowledge">База знаний</NavLink>{user?.role === 'admin' && <NavLink to="/admin">Админка</NavLink>}</nav>
+      <nav className="main-nav" aria-label="Главная навигация"><NavLink to="/training">Тренировка</NavLink><NavLink to="/story">Сюжет</NavLink><NavLink to="/characters">Персонажи</NavLink><NavLink to="/knowledge">База знаний</NavLink>{user?.role === 'admin' && <NavLink to="/admin">Админка</NavLink>}</nav>
       <div className="header-actions">{user ? <><Link className="user-name" to="/account"><span className="user-name-display">{user.display_name} · </span>Кабинет</Link><button className="button outline small" onClick={logout}>Выйти</button></> : <button className="button outline small" onClick={() => setAuthOpen(true)}>Войти <span>↗</span></button>}</div>
     </header>
     <main id="main-content">{children}</main>
@@ -198,6 +199,7 @@ export default function App() {
     <Route path="/training/session/:id" element={<GameDialog />} />
     <Route path="/session/:id" element={<GameDialog />} />
     <Route path="/story" element={<Story />} />
+    <Route path="/characters" element={<CharactersPage />} />
     <Route path="/story/:id" element={<StoryDetailPage />} />
     <Route path="/story/mission/:id" element={<MissionSetup mode="story" />} />
     <Route path="/pvp" element={<PvpSoon />} />

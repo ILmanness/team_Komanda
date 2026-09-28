@@ -61,6 +61,7 @@ async def get_session(
                     id,
                     user_id,
                     status,
+                    mode,
                     state,
                     memory_summary,
                     config_snapshot,
@@ -188,7 +189,15 @@ async def session_websocket(
             content = message.content if not is_choice else None
             evaluation_override = None
             response_override = None
+            if session['mode'] == 'method_training' and not is_choice:
+                await websocket.send_json({'type': 'error', 'code': 'training_requires_choice',
+                                           'message': 'Choose a prepared training answer'})
+                continue
             if is_choice:
+                if session['mode'] != 'method_training':
+                    await websocket.send_json({'type': 'error', 'code': 'choice_unavailable',
+                                               'message': 'Answer choices are only available in training'})
+                    continue
                 config = (session['config_snapshot'] or {}).get('mission') or {}
                 if config.get('config', {}).get('training') is None:
                     await websocket.send_json({'type': 'error', 'code': 'choice_unavailable',

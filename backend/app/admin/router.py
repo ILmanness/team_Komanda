@@ -53,7 +53,8 @@ async def overview(_admin: AdminUser):
         'missions': '''SELECT m.id, m.title, m.mission_type, m.interaction_type, m.status,
                              m.storyline_id, m.knowledge_item_id, m.character_id,
                              m.branch_key, m.order_index FROM missions m ORDER BY m.created_at DESC''',
-        'characters': '''SELECT id, slug, name, role_title, description, base_prompt
+        'characters': '''SELECT id, slug, name, role_title, description, base_prompt,
+                         paei_profile_id, paei_description, behavior_description, portrait_url
                          FROM characters ORDER BY name''',
         'knowledge': '''SELECT id, slug, item_type, title, summary, body, parent_id, status
                         FROM knowledge_items ORDER BY title''',
@@ -83,15 +84,20 @@ async def update_storyline(item_id: UUID, data: StorylineWrite, _admin: AdminUse
 
 @router.post('/characters', status_code=201)
 async def create_character(data: CharacterWrite, _admin: AdminUser):
-    return await _write('''INSERT INTO characters(slug, name, role_title, description, base_prompt)
-                     VALUES (:slug, :name, :role_title, :description, :base_prompt)
+    return await _write('''INSERT INTO characters(slug, name, role_title, description, base_prompt,
+                     paei_profile_id, paei_description, behavior_description, portrait_url)
+                     VALUES (:slug, :name, :role_title, :description, :base_prompt,
+                     :paei_profile_id, :paei_description, :behavior_description, :portrait_url)
                      RETURNING id''', data.model_dump())
 
 
 @router.put('/characters/{item_id}')
 async def update_character(item_id: UUID, data: CharacterWrite, _admin: AdminUser):
     return await _write('''UPDATE characters SET slug=:slug, name=:name, role_title=:role_title,
-                     description=:description, base_prompt=:base_prompt, updated_at=now()
+                     description=:description, base_prompt=:base_prompt,
+                     paei_profile_id=:paei_profile_id, paei_description=:paei_description,
+                     behavior_description=:behavior_description, portrait_url=:portrait_url,
+                     updated_at=now()
                      WHERE id=:id RETURNING id''', {**data.model_dump(), 'id': item_id})
 
 
@@ -129,7 +135,8 @@ def _mission_params(data: MissionWrite) -> dict:
         'order_index': data.order_index if data.mission_type == 'story' else None,
         'title': data.title,
         'task': data.task,
-        'context': Jsonb({'situation': data.situation, 'opening_message': data.opening_message}),
+        'context': Jsonb({'situation': data.situation, 'public_context': data.public_context,
+                          'opening_message': data.opening_message}),
         'config': Jsonb({'max_turns': 1 if data.interaction_type == 'single_choice' else data.max_turns,
                          'training': training}),
     }

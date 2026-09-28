@@ -81,12 +81,18 @@ export type GameSession = {
   character_id: string | null;
   mission_title?: string | null;
   mission_task?: string | null;
+  mission_situation?: string | null;
+  mission_public_context?: string | null;
   character_name?: string | null;
   character_slug?: string | null;
+  character_role_title?: string | null;
+  character_description?: string | null;
+  character_paei_description?: string | null;
+  character_behavior_description?: string | null;
   custom_context: CustomSessionSettings | null;
   state: { turn?: number; contact?: number; tension?: number; progress?: number; score?: number; node_id?: string; goal_state?: { status: 'unresolved' | 'advancing' | 'achieved' | 'blocked'; review_available?: boolean } };
   final_result: { result?: string; reason?: string; score?: number } | null;
-  ai_mode: 'mock' | 'compatible';
+  ai_mode: 'none' | 'mock' | 'compatible';
 };
 
 export type GameSessionSummary = Pick<GameSession, 'id' | 'mode' | 'status' | 'mission_id' | 'custom_context' | 'state'> & {
@@ -103,7 +109,9 @@ export type AccountStats = {
 
 export type GameMessage = { id: string; sequence_number: number; role: 'user' | 'assistant' | 'system'; content: string; emotion?: 'neutral' | 'warm' | 'tense' | 'angry'; processing_status: string };
 
-export type CharacterOption = { id: string; slug: string; name: string; role_title: string; description: string };
+export type CharacterOption = { id: string; slug: string; name: string; role_title: string; description: string;
+  paei_profile_id: string | null; paei_code: string | null; paei_leading_letter: string | null;
+  paei_description: string; behavior_description: string; portrait_url: string };
 export type GameOptions = {
   characters: CharacterOption[];
   paei_profiles: { id: string; code: string; leading_letter: string }[];
@@ -116,6 +124,8 @@ export type MissionBriefing = {
   interaction_type: string;
   title: string;
   task: string;
+  situation: string;
+  public_context: string;
   character: CharacterOption | null;
   choices: { id: string; text: string }[];
   hints: string[];
@@ -153,13 +163,13 @@ export type AdminOverview = {
 export type AdminChoice = { id: string; text: string; feedback: string; quality: number; contact: number; tension: number; progress: number; critical_error: boolean };
 export type AdminMission = AdminMissionSummary & {
   task: string;
-  context: { situation?: string; opening_message?: string };
+  context: { situation?: string; public_context?: string; opening_message?: string };
   config: { max_turns?: number; training?: { choices: AdminChoice[]; hints: string[] } };
 };
 export type AdminMissionWrite = {
   mission_type: Mission['mission_type']; interaction_type: 'ai_dialogue' | 'single_choice';
   storyline_id: string | null; knowledge_item_id: string | null; character_id: string;
-  branch_key: string | null; order_index: number | null; title: string; situation: string;
+  branch_key: string | null; order_index: number | null; title: string; situation: string; public_context: string;
   task: string; opening_message: string; max_turns: number; choices: AdminChoice[]; hints: string[];
 };
 
@@ -215,6 +225,7 @@ export const api = {
       method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ answers }),
     }),
   gameOptions: (signal?: AbortSignal) => request<GameOptions>('/v1/game/options', { signal }),
+  characters: (signal?: AbortSignal) => request<CharacterOption[]>('/v1/characters', { signal }),
   missionBriefing: (id: string, signal?: AbortSignal) => request<MissionBriefing>(`/v1/missions/${encodeURIComponent(id)}/briefing`, { signal }),
   sessions: (token: string, signal?: AbortSignal) => request<GameSessionSummary[]>('/v1/sessions', {
     signal, headers: { Authorization: `Bearer ${token}` },

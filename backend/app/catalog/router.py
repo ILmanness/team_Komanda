@@ -11,6 +11,7 @@ from app.db import engine
 from app.story_progress import get_story_progress
 
 from .schemas import (
+    CharacterOption,
     GameOptions,
     KnowledgeDetail,
     KnowledgeListItem,
@@ -220,20 +221,32 @@ async def list_missions(
 @router.get('/game/options', response_model=GameOptions)
 async def get_game_options():
     return GameOptions(
-        characters=await _fetch_all('SELECT id, slug, name, role_title, description FROM characters ORDER BY name'),
+        characters=await list_characters(),
         paei_profiles=await _fetch_all('SELECT id, code, leading_letter FROM paei_profiles ORDER BY code'),
         difficulty_profiles=await _fetch_all('SELECT id, code, title FROM difficulty_profiles ORDER BY title'),
     )
+
+
+@router.get('/characters', response_model=list[CharacterOption])
+async def list_characters():
+    return await _fetch_all('''SELECT c.id, c.slug, c.name, c.role_title, c.description,
+        c.paei_profile_id, p.code AS paei_code, p.leading_letter AS paei_leading_letter,
+        c.paei_description, c.behavior_description, c.portrait_url
+        FROM characters c LEFT JOIN paei_profiles p ON p.id=c.paei_profile_id
+        ORDER BY c.name''')
 
 
 @router.get('/missions/{mission_id}/briefing', response_model=MissionBriefing)
 async def get_mission_briefing(mission_id: UUID):
     mission = await _fetch_one('''
         SELECT m.id, m.storyline_id, m.mission_type, m.interaction_type,
-               m.title, m.task, m.config, c.id AS character_id, c.slug AS character_slug, c.name AS character_name,
-               c.role_title AS character_role_title, c.description AS character_description
+               m.title, m.task, m.context, m.config, c.id AS character_id, c.slug AS character_slug, c.name AS character_name,
+               c.role_title AS character_role_title, c.description AS character_description,
+               c.paei_profile_id, p.code AS paei_code, p.leading_letter AS paei_leading_letter,
+               c.paei_description, c.behavior_description, c.portrait_url
         FROM missions AS m
         LEFT JOIN characters AS c ON c.id = m.character_id
+        LEFT JOIN paei_profiles AS p ON p.id = c.paei_profile_id
         WHERE m.id = :id AND m.status = 'published'
     ''', {'id': mission_id})
     if mission is None:
@@ -244,11 +257,16 @@ async def get_mission_briefing(mission_id: UUID):
             'id': mission['character_id'], 'slug': mission['character_slug'], 'name': mission['character_name'],
             'role_title': mission['character_role_title'],
             'description': mission['character_description'],
+            'paei_profile_id': mission['paei_profile_id'], 'paei_code': mission['paei_code'],
+            'paei_leading_letter': mission['paei_leading_letter'],
+            'paei_description': mission['paei_description'],
+            'behavior_description': mission['behavior_description'], 'portrait_url': mission['portrait_url'],
         }
     training = (mission['config'] or {}).get('training') or {}
     return MissionBriefing(**{
         key: mission[key] for key in ('id', 'storyline_id', 'mission_type', 'interaction_type', 'title', 'task')
-    }, character=character,
+    }, situation=(mission['context'] or {}).get('situation', ''),
+        public_context=(mission['context'] or {}).get('public_context', ''), character=character,
         choices=[{'id': item['id'], 'text': item['text']} for item in training.get('choices', [])],
         hints=training.get('hints', []))
 

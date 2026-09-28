@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
-import { api, ApiError, GameMessage, GameOptions, GameSession, MissionBriefing, sessionSocketUrl } from './api';
+import { api, ApiError, GameMessage, GameSession, MissionBriefing, sessionSocketUrl } from './api';
 import { useAuth } from './auth-context';
 import { NovelLine, NovelStage } from './NovelStage';
 
@@ -16,60 +16,52 @@ export function MissionSetup({ mode }: { mode: 'story' | 'method_training' }) {
   const navigate = useNavigate();
   const { user, checking, openAuth } = useAuth();
   const [briefing, setBriefing] = useState<MissionBriefing | null>(null);
-  const [options, setOptions] = useState<GameOptions | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([api.missionBriefing(id, controller.signal), api.gameOptions(controller.signal)])
-      .then(([mission, available]) => {
+    api.missionBriefing(id, controller.signal)
+      .then(mission => {
         if (mission.mission_type !== mode) throw new Error('Неверный режим миссии');
         setBriefing(mission);
-        setOptions(available);
       })
       .catch(cause => { if (cause.name !== 'AbortError') setError(errorText(cause)); });
     return () => controller.abort();
   }, [id, mode]);
 
-  async function start(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function start() {
     const token = sessionStorage.getItem('arena_token');
     if (!token || !user) { openAuth(); setError('Войдите, чтобы начать миссию.'); return; }
-    const form = new FormData(event.currentTarget);
     setPending(true);
     setError('');
     try {
       const guided = briefing?.interaction_type === 'guided_training';
-      const created = await api.createSession(token, {
-        mode, mission_id: id,
-        ...(guided ? {} : {
-          paei_profile_id: String(form.get('paei_profile_id')),
-          difficulty_profile_id: String(form.get('difficulty_profile_id')),
-        }),
-      });
+      const created = await api.createSession(token, { mode, mission_id: id });
       navigate(guided ? `/training/guided/${created.id}` : `/session/${created.id}`);
     } catch (cause) { setError(errorText(cause)); }
     finally { setPending(false); }
   }
 
   const back = mode === 'story' ? '/story' : '/training';
-  if (!briefing || !options) return <section className="section-wrap content-section custom-loading"><Link className="back-link" to={back}>← Назад</Link><div className="notice" role="status">{error || 'Загружаем сценарий…'}</div></section>;
+  if (!briefing) return <section className="section-wrap content-section custom-loading"><Link className="back-link" to={back}>← Назад</Link><div className="notice" role="status">{error || 'Загружаем сценарий…'}</div></section>;
   const guided = briefing.interaction_type === 'guided_training';
-  const ready = guided || (options.paei_profiles.length > 0 && options.difficulty_profiles.length > 0 && briefing.character !== null);
+  const ready = briefing.character !== null && (mode === 'story' || guided || briefing.interaction_type === 'single_choice');
   return <div className="section-wrap custom-page mission-setup">
     <Link className="back-link" to={back}>← Назад</Link>
     <div className="custom-page-heading"><span className="eyebrow">{mode === 'story' ? 'Сюжетная сцена' : 'Тренировка'}</span><h1>{briefing.title}</h1><p>{briefing.task}</p></div>
     <div className="mission-setup-layout"><aside className="mission-character"><img src={mode === 'story' ? '/images/office-story-scene.png' : '/images/office-training-scene.png'} alt="Персонажи в офисе" /><div><span className="eyebrow">{guided ? 'Формат' : 'Собеседник'}</span><h2>{guided ? 'Несколько решений' : briefing.character?.name || 'Пока не назначен'}</h2>{guided ? <p>Разберите рабочие эпизоды, посмотрите реакцию собеседника и объяснения наставника.</p> : <><p>{briefing.character?.role_title}</p><p>{briefing.character?.description}</p></>}</div></aside>
-      <form className="custom-form" onSubmit={start}><span className="form-section-name">{guided ? 'Как проходит тренировка' : 'Перед разговором'}</span>
-        {guided ? <p className="form-note">Выберите ответ в нескольких рабочих ситуациях. Если решение не учитывает все условия, наставник даст подсказку и ещё одну попытку. В конце ответьте на новый вопрос своими словами.</p> : <>
-        <label>Профиль PAEI<select name="paei_profile_id" required>{options.paei_profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.code} · {profile.leading_letter}</option>)}</select></label>
-        <label>Сложность<select name="difficulty_profile_id" required>{options.difficulty_profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.title}</option>)}</select></label></>}
-        {!ready && <p className="form-note">Миссию можно будет начать, когда для неё добавят персонажа и профили игры.</p>}
+      <div className="custom-form"><span className="form-section-name">{guided ? 'Как проходит тренировка' : mode === 'story' ? 'Контекст сцены' : 'Перед тренировкой'}</span>
+        {guided ? <p className="form-note">Выбирайте подготовленные ответы, читайте реакцию наставницы и проверяйте себя по критериям. Нейросеть здесь не участвует.</p> : <>
+          <p><strong>Что происходит:</strong> {briefing.situation || 'Подробности ситуации появятся в разговоре.'}</p>
+          {briefing.public_context && <p><strong>Что уже известно:</strong> {briefing.public_context}</p>}
+          <p><strong>Ваша цель:</strong> {briefing.task}</p>
+        </>}
+        {!ready && <p className="form-note">Миссию можно будет начать, когда для неё добавят персонажа и подходящий формат.</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
         {!user && !checking && <p className="form-note">Для сохранения результата нужен аккаунт.</p>}
-        <button className="button primary" type="submit" disabled={!ready || pending || checking}>{pending ? 'Начинаем…' : guided ? 'Начать тренировку' : 'Начать разговор'} <span>→</span></button>
-      </form>
+        <button className="button primary" type="button" onClick={start} disabled={!ready || pending || checking}>{pending ? 'Начинаем…' : guided ? 'Начать тренировку' : 'Начать разговор'} <span>→</span></button>
+      </div>
     </div>
   </div>;
 }
@@ -181,6 +173,7 @@ export function GameDialog() {
   if (!user) return <section className="section-wrap content-section custom-loading"><div className="notice"><h1>Войдите, чтобы открыть разговор</h1><p>Он доступен только в аккаунте, где был начат.</p><button className="button primary" onClick={openAuth}>Войти <span>→</span></button></div></section>;
   if (!session) return <section className="section-wrap content-section custom-loading"><div className="notice error" role="alert">{error || 'Разговор не найден.'}</div><Link className="back-link" to="/training">← К тренировкам</Link></section>;
   if (session.state.node_id) return <Navigate to={`/training/guided/${session.id}`} replace />;
+  if (session.mode === 'method_training' && briefing?.interaction_type === 'ai_dialogue') return <section className="section-wrap content-section"><div className="notice">Этот старый формат тренировки больше не доступен. Выберите сценарий с подготовленными ответами.</div><Link className="back-link" to="/training">← К тренировкам</Link></section>;
 
   const custom = session.custom_context;
   const back = session.mode === 'story' ? '/story' : '/training';
@@ -213,8 +206,17 @@ export function GameDialog() {
   return <div className="section-wrap dialog-page">
     <Link className="back-link" to={back}>← Назад</Link>
     <div className="dialog-heading"><div><span className="eyebrow">{session.mode === 'story' ? 'Сюжет' : 'Тренировка'}</span><h1>{name}</h1><p>{briefing?.title || session.mission_title || custom?.situation}</p></div><span className="pill">{session.state.turn || 0} реплик</span></div>
-    <div className="dialog-layout"><aside className="dialog-brief"><span className="eyebrow">Ваша задача</span><h2>{goal}</h2>
-      {custom && <dl><dt>Ваша роль</dt><dd>{custom.player_role}</dd><dt>Собеседник</dt><dd>{custom.opponent_role}</dd></dl>}
+    <div className="dialog-layout"><aside className="dialog-brief"><details className="dialog-info"><summary>Информация о разговоре <span>↗</span></summary><div className="dialog-info-content">
+      <dl><dt>Ситуация</dt><dd>{briefing?.situation || session.mission_situation || custom?.situation || 'Детали ситуации не указаны. Уточните их у собеседника.'}</dd>
+        {(briefing?.public_context || session.mission_public_context) && <><dt>Что известно</dt><dd>{briefing?.public_context || session.mission_public_context}</dd></>}
+        <dt>Ваша цель</dt><dd>{goal}</dd>
+        {custom?.player_role && <><dt>Ваша роль</dt><dd>{custom.player_role}</dd></>}
+        <dt>Собеседник</dt><dd>{name}{(briefing?.character?.role_title || session.character_role_title || custom?.opponent_role) && ` · ${briefing?.character?.role_title || session.character_role_title || custom?.opponent_role}`}</dd>
+        {(briefing?.character?.description || session.character_description) && <><dt>О персонаже</dt><dd>{briefing?.character?.description || session.character_description}</dd></>}
+        {(briefing?.character?.behavior_description || session.character_behavior_description) && <><dt>Как ведёт себя</dt><dd>{briefing?.character?.behavior_description || session.character_behavior_description}</dd></>}
+        {(briefing?.character?.paei_description || session.character_paei_description) && <><dt>Профиль PAEI</dt><dd>{briefing?.character?.paei_description || session.character_paei_description}</dd></>}
+      </dl><p>Если собеседник спрашивает о данных, которых здесь нет, уточните их в разговоре.</p>
+      {session.mode !== 'custom' && <Link to="/characters" className="text-link">Все персонажи ↗</Link>}</div></details>
       {(session.ai_mode !== 'mock' || choiceTraining) && <div className="game-state"><span>Контакт {session.state.contact ?? 0}</span><span>Напряжение {session.state.tension ?? 0}</span><span>{goalState ? 'Прогресс к цели' : 'Прогресс'} {session.state.progress ?? 0}{goalState && '/100'}</span>{goalState && <span>{goalStatusLabel}</span>}</div>}
       {session.mode === 'custom' && <Link to="/training/custom" className="text-link">Новый свой диалог ↗</Link>}</aside>
       <section className="dialog-main" aria-label="Диалог"><NovelStage lines={lines} name={session.mode === 'method_training' ? 'Старшая коллега' : name} playerName={user.display_name} character={character} waiting={pending && !streamed} />

@@ -53,8 +53,14 @@ class SessionResponse(BaseModel):
     ai_mode: str
     mission_title: str | None = None
     mission_task: str | None = None
+    mission_situation: str | None = None
+    mission_public_context: str | None = None
     character_name: str | None = None
     character_slug: str | None = None
+    character_role_title: str | None = None
+    character_description: str | None = None
+    character_paei_description: str | None = None
+    character_behavior_description: str | None = None
 
     started_at: datetime
     last_activity_at: datetime

@@ -56,6 +56,21 @@ async def seed() -> dict[str, int]:
             ON CONFLICT DO NOTHING RETURNING id
         ''', {'id': difficulty, 'settings': Jsonb({'max_turns': 20})})
 
+        await connection.execute(text("""
+            UPDATE characters SET paei_profile_id=(SELECT id FROM paei_profiles WHERE code='DEMO_A'),
+                paei_description='A · Администратор. Нужны ясные сроки, ответственные и план.',
+                behavior_description='Уточняет риск для команды. Ценит признание проблемы и конкретный следующий шаг.',
+                portrait_url='/images/anna-frames.png'
+            WHERE slug='demo-anna' AND portrait_url=''
+        """))
+        await connection.execute(text("""
+            UPDATE characters SET paei_profile_id=(SELECT id FROM paei_profiles WHERE code='DEMO_P'),
+                paei_description='P · Результат. Смотрит на договорённости через итог и срок.',
+                behavior_description='Задаёт прямые вопросы. Ценит честный план с контрольными точками.',
+                portrait_url='/images/igor-frames.png'
+            WHERE slug='demo-igor' AND portrait_url=''
+        """))
+
         storyline = demo_id('storyline:first-week')
         counts['storylines'] += await insert(connection, '''
             INSERT INTO storylines(id, slug, title, description, status)

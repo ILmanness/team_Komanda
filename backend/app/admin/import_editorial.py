@@ -128,9 +128,14 @@ def apply(knowledge, trainings):
 
         mentor_id = stable_id('character:training-mentor')
         connection.execute(text("""
-            INSERT INTO characters (id, slug, name, role_title, description, base_prompt)
+            INSERT INTO characters (id, slug, name, role_title, description, base_prompt,
+                paei_profile_id, paei_description, behavior_description, portrait_url)
             VALUES (:id, 'training-mentor', 'Наставник', 'Ведущий тренировки',
-                    'Помогает разобрать решение и перейти к следующей ситуации.', '')
+                    'Опытная коллега, которая помогает разобрать решение и перейти к следующей ситуации.', '',
+                    (SELECT id FROM paei_profiles WHERE code='DEMO_I'),
+                    'I · Интегратор. Помогает увидеть интересы людей и сохранить рабочие отношения.',
+                    'Описывает ситуацию, объясняет последствия выбранного варианта и даёт подготовленную подсказку.',
+                    '/images/mentor-frames.png')
             ON CONFLICT (slug) DO NOTHING
         """), {'id': mentor_id})
 

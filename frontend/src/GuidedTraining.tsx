@@ -61,16 +61,6 @@ export default function GuidedTrainingPage() {
     finally { setDraftChoice(''); setPending(false); }
   }
 
-  async function retryEvaluation() {
-    if (!training?.final_result?.answer) return;
-    const token = sessionStorage.getItem('arena_token');
-    if (!token) return;
-    setPending(true);
-    try { setTraining(await api.guidedAnswer(token, id, training.node.id, training.final_result.answer)); }
-    catch (cause) { setError(describeError(cause)); }
-    finally { setPending(false); }
-  }
-
   function continueAfterFeedback() {
     if (feedback) sessionStorage.setItem(`guided-seen-${id}`, String(feedback.sequence_no));
     setFeedback(null);
@@ -101,9 +91,15 @@ export default function GuidedTrainingPage() {
     <Link className="back-link" to="/training">← Все тренировки</Link>
     <header className="guided-heading"><div><span className="eyebrow">Тренировка · {training.title}</span>
       <h1>{finished ? 'Разбор тренировки' : training.node.type === 'free_text' ? 'Новая ситуация' : 'Рабочая ситуация'}</h1>
-      <p>{finished ? 'Ваши решения и разбор последнего эпизода.' : training.node.type === 'free_text' ? 'Ответьте своими словами. Пример появится после отправки.' : 'Выберите действие. После ответа увидите, как оно повлияло на разговор.'}</p>
+      <p>{finished ? 'Сравните своё решение с критериями и примером.' : training.node.type === 'free_text' ? 'Ответьте своими словами. После отправки откроются критерии для самопроверки.' : 'Выберите действие. Наставница объяснит результат и даст подсказку.'}</p>
     </div><span className="guided-counter">{training.events.length} решений</span></header>
 
+    <details className="dialog-info guided-info"><summary>Информация о тренировке <span>↗</span></summary><div className="dialog-info-content"><dl>
+      <dt>Тема</dt><dd>{training.title}</dd>
+      <dt>Ситуация</dt><dd>{training.node.text}</dd>
+      <dt>Цель</dt><dd>{training.node.goal || 'Изучите ситуацию и выберите решение, которое учитывает интересы сторон.'}</dd>
+      <dt>Наставница</dt><dd>Старшая коллега объяснит последствия выбранного ответа и подскажет, что можно улучшить.</dd>
+    </dl></div></details>
     <NovelStage lines={lines} name="Старшая коллега" playerName={user.display_name} character="mentor" waiting={pending} />
     <div className={`guided-layout${finished ? ' is-finished' : ''}`}>
       <section className="guided-actions">
@@ -120,12 +116,9 @@ export default function GuidedTrainingPage() {
           <button className="button primary" disabled={pending || !answer.trim()}>{pending ? 'Проверяем…' : 'Отправить ответ →'}</button>
         </form>}
         {finished && <div className="guided-result">
-          <span className="eyebrow">Проверка новой ситуации</span>
-          {result?.criteria?.length ? <ul>{training.criteria.map(criterion => {
-            const grade = result.criteria?.find(item => item.criterion_id === criterion.criterion_id);
-            return <li key={criterion.criterion_id}><strong>{criterion.criterion}</strong><span>{grade?.status === 'met' ? 'Выполнено' : grade?.status === 'unclear' ? 'Нужно уточнить' : 'Не найдено в ответе'}</span>{grade?.evidence_quote && <blockquote>«{grade.evidence_quote}»</blockquote>}{grade?.reason && <p>{grade.reason}</p>}</li>;
-          })}</ul> : <p>Автоматическая проверка сейчас недоступна. Ответ сохранён; результат не засчитан автоматически.</p>}
-          {training.status === 'needs_review' && <button className="button outline" disabled={pending} onClick={retryEvaluation}>Повторить проверку</button>}
+          <span className="eyebrow">Самопроверка</span>
+          <p>Ответ сохранён. Тренировка использует подготовленные варианты и объяснения наставницы; нейросеть здесь не оценивает вас.</p>
+          {training.criteria.length > 0 && <ul>{training.criteria.map(criterion => <li key={criterion.criterion_id}><strong>{criterion.criterion}</strong></li>)}</ul>}
           {training.example_answer && <details><summary>Посмотреть пример ответа</summary><p>{training.example_answer}</p></details>}
           <div className="guided-result-links"><Link className="button primary" to="/training">К тренировкам →</Link><Link className="button outline" to="/knowledge">Повторить материал {training.material_id}</Link></div>
         </div>}
