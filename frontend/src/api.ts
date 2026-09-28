@@ -63,11 +63,11 @@ export type SessionMode = 'custom' | 'story' | 'method_training';
 export type GameSession = {
   id: string;
   mode: SessionMode;
-  status: 'active' | 'completed' | 'failed' | 'abandoned';
+  status: 'active' | 'completed' | 'failed' | 'abandoned' | 'needs_review';
   mission_id: string | null;
   character_id: string | null;
   custom_context: CustomSessionSettings | null;
-  state: { turn?: number; contact?: number; tension?: number; progress?: number; score?: number };
+  state: { turn?: number; contact?: number; tension?: number; progress?: number; score?: number; node_id?: string };
   final_result: { result?: string; reason?: string; score?: number } | null;
   ai_mode: 'mock' | 'compatible';
 };
@@ -102,6 +102,23 @@ export type MissionBriefing = {
   character: CharacterOption | null;
   choices: { id: string; text: string }[];
   hints: string[];
+};
+
+export type GuidedEvent = {
+  sequence_no: number; node_id: string; base_node_id: string; choice_id: string;
+  choice_text: string; assessment: 'correct' | 'partial' | 'incorrect';
+  effect: string | null; feedback_text: string; transition_notice: string | null;
+  attempt_stage: 'first' | 'retry'; resolution: string;
+};
+export type GuidedTraining = {
+  session_id: string; status: GameSession['status']; training_id: string; title: string;
+  node: { id: string; speaker: string; text: string; type: 'decision' | 'knowledge' | 'retry' | 'free_text'; goal: string };
+  choices: { id: 'a' | 'b' | 'c'; text: string }[];
+  events: GuidedEvent[];
+  criteria: { criterion_id: string; criterion: string }[];
+  example_answer: string | null;
+  final_result: { result?: string; answer?: string; criteria?: { criterion_id: string; status: string; evidence_quote: string; reason: string }[] } | null;
+  material_id: string;
 };
 
 export type AdminStoryline = Storyline & { status: string };
@@ -185,6 +202,15 @@ export const api = {
   }),
   finishSession: (token: string, id: string) => request<{ status: GameSession['status'] }>(`/v1/sessions/${encodeURIComponent(id)}/finish`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  }),
+  guided: (token: string, id: string, signal?: AbortSignal) => request<GuidedTraining>(`/v1/sessions/${encodeURIComponent(id)}/guided`, {
+    signal, headers: { Authorization: `Bearer ${token}` },
+  }),
+  guidedChoice: (token: string, id: string, node_id: string, choice_id: string) => request<GuidedTraining>(`/v1/sessions/${encodeURIComponent(id)}/guided/choice`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ node_id, choice_id }),
+  }),
+  guidedAnswer: (token: string, id: string, node_id: string, text: string) => request<GuidedTraining>(`/v1/sessions/${encodeURIComponent(id)}/guided/answer`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ node_id, text }),
   }),
   me: (token: string) => request<User>('/v1/users/me', { headers: { Authorization: `Bearer ${token}` } }),
   accountStats: (token: string, signal?: AbortSignal) => request<AccountStats>('/v1/users/me/stats', {

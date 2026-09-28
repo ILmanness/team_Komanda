@@ -153,7 +153,9 @@ def create_mission(data: MissionWrite, _admin: AdminUser):
 
 @router.put('/missions/{item_id}')
 def update_mission(item_id: UUID, data: MissionWrite, _admin: AdminUser):
-    existing = _one('SELECT mission_type FROM missions WHERE id=:id', {'id': item_id})
+    existing = _one('SELECT mission_type, interaction_type FROM missions WHERE id=:id', {'id': item_id})
+    if existing['interaction_type'] == 'guided_training':
+        raise HTTPException(status_code=409, detail='Guided training is managed by the editorial import')
     if existing['mission_type'] != data.mission_type:
         raise HTTPException(status_code=422, detail='Mission mode cannot be changed after creation')
     return _write('''UPDATE missions SET storyline_id=:storyline_id,

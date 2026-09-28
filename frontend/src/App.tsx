@@ -4,6 +4,7 @@ import { api, ApiError, KnowledgeDetail, KnowledgeItem, Mission, Storyline, Stor
 import { AuthContext, useAuth } from './auth-context';
 import { CustomTrainingForm } from './CustomTraining';
 import { GameDialog, MissionSetup } from './GameSession';
+import GuidedTrainingPage from './GuidedTraining';
 import { AdminPage } from './Admin';
 import { AccountPage } from './AccountPage';
 import './styles.css';
@@ -134,7 +135,7 @@ function Training() {
   return <><section className="training-banner section-wrap"><div><span className="eyebrow">Один на один</span><h1>Тренировка</h1><p>В каждой тренировке вы разговариваете с одним собеседником. Выбирайте ситуацию и пробуйте новые решения.</p></div><img src="/images/office-training-scene.png" alt="Собеседница в переговорной" /></section>
     <section className="section-wrap custom-entry"><div><span className="eyebrow">Ваш сценарий</span><h2>Разговор на ваших условиях</h2><p>Опишите ситуацию, задайте цель и характер собеседника. После этого можно сразу начать диалог.</p></div><Link className="button primary" to="/training/custom">Создать свой диалог <span>↗</span></Link></section>
     <section className="section-wrap content-section"><div className="content-toolbar"><div><span className="eyebrow">Каталог тренировок</span><h2>Выберите сценарий</h2></div><span className="pill">{missions.data?.length ?? 0} доступно</span></div>
-      <ResourceView resource={missions} empty="Опубликованных тренировок пока нет. Как только появятся сценарии, они будут показаны здесь.">{items => <div className="list-grid">{items.map((mission: Mission) => <Link className="list-card" to={`/training/mission/${mission.id}`} key={mission.id}><div><span className="eyebrow">{mission.interaction_type === 'single_choice' ? 'Выбор ответа' : 'Диалог'}</span><h3>{mission.title}</h3><p>Откройте сценарий и настройте разговор.</p></div><span className="round-arrow">↗</span></Link>)}</div>}</ResourceView>
+      <ResourceView resource={missions} empty="Опубликованных тренировок пока нет. Как только появятся сценарии, они будут показаны здесь.">{items => <div className="list-grid">{items.map((mission: Mission) => <Link className="list-card" to={`/training/mission/${mission.id}`} key={mission.id}><div><span className="eyebrow">{mission.interaction_type === 'guided_training' ? 'Практика решений' : mission.interaction_type === 'single_choice' ? 'Выбор ответа' : 'Диалог'}</span><h3>{mission.title}</h3><p>{mission.interaction_type === 'guided_training' ? 'Несколько ситуаций, подсказки и ответ своими словами.' : 'Откройте сценарий и настройте разговор.'}</p></div><span className="round-arrow">↗</span></Link>)}</div>}</ResourceView>
     </section></>;
 }
 
@@ -184,7 +185,7 @@ function KnowledgeDetailPage() {
   const { id = '' } = useParams();
   const resource = useResource(`knowledge-${id}`, signal => api.knowledgeItem(id, signal));
   return <><PageIntro eyebrow="База знаний" title={resource.data?.title || 'Материал'} text={resource.data?.summary || 'Исследуйте материал и связанные темы.'} back="/knowledge" />
-    <section className="section-wrap content-section"><ResourceView resource={resource} empty="Материал не найден.">{(item: KnowledgeDetail) => <div className="article-layout"><article className="article-card"><span className="eyebrow">{item.item_type === 'topic' ? 'Тема' : item.item_type === 'method' ? 'Метод' : 'Статья'}</span><h2>{item.title}</h2>{item.body ? <div className="article-body">{item.body}</div> : <p className="muted">Текст материала пока не опубликован.</p>}</article>
+    <section className="section-wrap content-section"><ResourceView resource={resource} empty="Материал не найден.">{(item: KnowledgeDetail) => <div className="article-layout"><article className="article-card"><span className="eyebrow">{item.metadata.kind === 'test' ? 'Самопроверка' : item.item_type === 'topic' ? 'Тема' : item.item_type === 'method' ? 'Метод' : 'Статья'}</span><h2>{item.title}</h2>{item.body ? <div className="article-body">{item.body}</div> : <p className="muted">Текст материала пока не опубликован.</p>}{typeof item.metadata.answer_key === 'string' && <details className="article-answer-key"><summary>Посмотреть ответы и разбор</summary><div className="article-body">{item.metadata.answer_key}</div></details>}</article>
       <aside className="article-side"><span className="eyebrow">Следующий шаг</span><h3>Продолжайте изучение</h3><p>Читайте связанные материалы или вернитесь к списку тем.</p><Link className="button outline" to="/knowledge">Все темы <span>→</span></Link></aside>
       {item.children.length > 0 && <div className="related"><h2>В этой теме</h2>{item.children.map((child: KnowledgeItem) => <Link key={child.id} to={`/knowledge/${child.id}`} className="related-link">{child.title}<span>↗</span></Link>)}</div>}</div>}</ResourceView></section></>;
 }
@@ -200,6 +201,7 @@ export default function App() {
     <Route path="/training" element={<Training />} />
     <Route path="/training/custom" element={<CustomTrainingForm />} />
     <Route path="/training/mission/:id" element={<MissionSetup mode="method_training" />} />
+    <Route path="/training/guided/:id" element={<GuidedTrainingPage />} />
     <Route path="/training/session/:id" element={<GameDialog />} />
     <Route path="/session/:id" element={<GameDialog />} />
     <Route path="/story" element={<Story />} />

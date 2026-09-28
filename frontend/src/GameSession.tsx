@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, GameMessage, GameOptions, GameSession, MissionBriefing, sessionSocketUrl } from './api';
 import { useAuth } from './auth-context';
 
@@ -61,30 +61,35 @@ export function MissionSetup({ mode }: { mode: 'story' | 'method_training' }) {
     setPending(true);
     setError('');
     try {
+      const guided = briefing?.interaction_type === 'guided_training';
       const created = await api.createSession(token, {
         mode, mission_id: id,
-        paei_profile_id: String(form.get('paei_profile_id')),
-        difficulty_profile_id: String(form.get('difficulty_profile_id')),
+        ...(guided ? {} : {
+          paei_profile_id: String(form.get('paei_profile_id')),
+          difficulty_profile_id: String(form.get('difficulty_profile_id')),
+        }),
       });
-      navigate(`/session/${created.id}`);
+      navigate(guided ? `/training/guided/${created.id}` : `/session/${created.id}`);
     } catch (cause) { setError(errorText(cause)); }
     finally { setPending(false); }
   }
 
   const back = mode === 'story' ? '/story' : '/training';
   if (!briefing || !options) return <section className="section-wrap content-section custom-loading"><Link className="back-link" to={back}>← Назад</Link><div className="notice" role="status">{error || 'Загружаем сценарий…'}</div></section>;
-  const ready = options.paei_profiles.length > 0 && options.difficulty_profiles.length > 0 && briefing.character !== null;
+  const guided = briefing.interaction_type === 'guided_training';
+  const ready = guided || (options.paei_profiles.length > 0 && options.difficulty_profiles.length > 0 && briefing.character !== null);
   return <div className="section-wrap custom-page mission-setup">
     <Link className="back-link" to={back}>← Назад</Link>
     <div className="custom-page-heading"><span className="eyebrow">{mode === 'story' ? 'Сюжетная сцена' : 'Тренировка'}</span><h1>{briefing.title}</h1><p>{briefing.task}</p></div>
-    <div className="mission-setup-layout"><aside className="mission-character"><img src={mode === 'story' ? '/images/office-story-scene.png' : '/images/office-training-scene.png'} alt="Персонажи в офисе" /><div><span className="eyebrow">Собеседник</span><h2>{briefing.character?.name || 'Пока не назначен'}</h2><p>{briefing.character?.role_title}</p><p>{briefing.character?.description}</p></div></aside>
-      <form className="custom-form" onSubmit={start}><span className="form-section-name">Перед разговором</span>
+    <div className="mission-setup-layout"><aside className="mission-character"><img src={mode === 'story' ? '/images/office-story-scene.png' : '/images/office-training-scene.png'} alt="Персонажи в офисе" /><div><span className="eyebrow">{guided ? 'Формат' : 'Собеседник'}</span><h2>{guided ? 'Несколько решений' : briefing.character?.name || 'Пока не назначен'}</h2>{guided ? <p>Разберите рабочие эпизоды, посмотрите реакцию собеседника и объяснения наставника.</p> : <><p>{briefing.character?.role_title}</p><p>{briefing.character?.description}</p></>}</div></aside>
+      <form className="custom-form" onSubmit={start}><span className="form-section-name">{guided ? 'Как проходит тренировка' : 'Перед разговором'}</span>
+        {guided ? <p className="form-note">Выберите ответ в нескольких рабочих ситуациях. Если решение не учитывает все условия, наставник даст подсказку и ещё одну попытку. В конце ответьте на новый вопрос своими словами.</p> : <>
         <label>Профиль PAEI<select name="paei_profile_id" required>{options.paei_profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.code} · {profile.leading_letter}</option>)}</select></label>
-        <label>Сложность<select name="difficulty_profile_id" required>{options.difficulty_profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.title}</option>)}</select></label>
+        <label>Сложность<select name="difficulty_profile_id" required>{options.difficulty_profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.title}</option>)}</select></label></>}
         {!ready && <p className="form-note">Миссию можно будет начать, когда для неё добавят персонажа и профили игры.</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
         {!user && !checking && <p className="form-note">Для сохранения результата нужен аккаунт.</p>}
-        <button className="button primary" type="submit" disabled={!ready || pending || checking}>{pending ? 'Начинаем…' : 'Начать разговор'} <span>→</span></button>
+        <button className="button primary" type="submit" disabled={!ready || pending || checking}>{pending ? 'Начинаем…' : guided ? 'Начать тренировку' : 'Начать разговор'} <span>→</span></button>
       </form>
     </div>
   </div>;
@@ -126,7 +131,7 @@ export function GameDialog() {
   }, [session?.mission_id]);
 
   useEffect(() => {
-    if (!user || session?.status !== 'active') return;
+    if (!user || session?.status !== 'active' || session.state.node_id) return;
     const token = sessionStorage.getItem('arena_token');
     if (!token) return;
     const socket = new WebSocket(sessionSocketUrl(token, id));
@@ -188,6 +193,7 @@ export function GameDialog() {
   if (checking || loading) return <section className="section-wrap content-section custom-loading"><div className="notice" role="status">Открываем разговор…</div></section>;
   if (!user) return <section className="section-wrap content-section custom-loading"><div className="notice"><h1>Войдите, чтобы открыть разговор</h1><p>Он доступен только в аккаунте, где был начат.</p><button className="button primary" onClick={openAuth}>Войти <span>→</span></button></div></section>;
   if (!session) return <section className="section-wrap content-section custom-loading"><div className="notice error" role="alert">{error || 'Разговор не найден.'}</div><Link className="back-link" to="/training">← К тренировкам</Link></section>;
+  if (session.state.node_id) return <Navigate to={`/training/guided/${session.id}`} replace />;
 
   const custom = session.custom_context;
   const back = session.mode === 'story' ? '/story' : '/training';

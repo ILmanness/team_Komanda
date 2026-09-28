@@ -135,6 +135,7 @@ def create_session(
                         id,
                         character_id,
                         mission_type,
+                        interaction_type,
                         storyline_id,
                         title,
                         context,
@@ -267,13 +268,13 @@ def create_session(
 
         if data.mode in ("story", "method_training"):
 
-            if paei is None:
+            if paei is None and mission['interaction_type'] != 'guided_training':
                 raise HTTPException(
                     status_code=400,
                     detail="paei_profile_id is required",
                 )
 
-            if difficulty is None:
+            if difficulty is None and mission['interaction_type'] != 'guided_training':
                 raise HTTPException(
                     status_code=400,
                     detail="difficulty_profile_id is required",
@@ -296,6 +297,9 @@ def create_session(
             "progress": 0,
             "critical_errors": 0,
         }
+        if mission is not None and mission['interaction_type'] == 'guided_training':
+            guided = (mission['config'] or {}).get('guided') or {}
+            initial_state = {'turn': 0, 'node_id': guided['start_node_id'], 'events': []}
 
         config_snapshot = {
             "mode": data.mode,

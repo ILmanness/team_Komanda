@@ -8,6 +8,7 @@ from app.catalog.router import router as catalog_router
 from app.config import get_settings
 from app.db import engine
 from app.sessions.router import router as sessions_router
+from app.sessions.guided import router as guided_router
 from app.sessions.websocket import router as websocket_router
 from app.users.router import router as users_router
 
@@ -21,6 +22,7 @@ app.include_router(admin_router)
 app.include_router(users_router)
 app.include_router(catalog_router)
 app.include_router(sessions_router)
+app.include_router(guided_router)
 app.include_router(websocket_router)
 
 @app.get('/health/live')
