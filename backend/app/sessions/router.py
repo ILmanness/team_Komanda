@@ -49,6 +49,7 @@ async def _get_session(
                     status,
                     state,
                     custom_context,
+                    config_snapshot,
                     final_result,
                     started_at,
                     last_activity_at,
@@ -70,7 +71,13 @@ async def _get_session(
             detail="Session not found",
         )
 
-    return {**dict(row), "ai_mode": get_settings().ai_provider}
+    data = dict(row)
+    snapshot = data.pop('config_snapshot') or {}
+    mission = snapshot.get('mission') or {}
+    character = snapshot.get('character') or {}
+    return {**data, "ai_mode": get_settings().ai_provider,
+            'mission_title': mission.get('title'), 'mission_task': mission.get('task'),
+            'character_name': character.get('name'), 'character_slug': character.get('slug')}
 
 
 @router.get("", response_model=list[SessionListItem])

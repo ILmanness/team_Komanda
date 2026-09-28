@@ -184,8 +184,8 @@ export function GameDialog() {
 
   const custom = session.custom_context;
   const back = session.mode === 'story' ? '/story' : '/training';
-  const name = briefing?.character?.name || custom?.opponent_name || custom?.opponent_role || briefing?.title || 'Разговор';
-  const goal = briefing?.task || custom?.goal || 'Продолжайте разговор и пробуйте разные решения.';
+  const name = briefing?.character?.name || session.character_name || custom?.opponent_name || custom?.opponent_role || briefing?.title || session.mission_title || 'Разговор';
+  const goal = briefing?.task || session.mission_task || custom?.goal || 'Продолжайте разговор и пробуйте разные решения.';
   const active = session.status === 'active';
   const choiceTraining = session.mode === 'method_training' && briefing?.interaction_type === 'single_choice';
   const storyReturn = briefing?.storyline_id ? `/story/${briefing.storyline_id}` : '/story';
@@ -195,11 +195,11 @@ export function GameDialog() {
   const lines: NovelLine[] = completed.map((item, index) => ({ key: `${index}-${item.role}`, role: item.role as 'user' | 'assistant', content: item.content, emotion: item.emotion }));
   if (optimistic) lines.push({ key: `${lines.length}-user`, role: 'user', content: optimistic });
   if (streamed) lines.push({ key: `${lines.length}-assistant`, role: 'assistant', content: streamed });
-  const slug = briefing?.character?.slug;
+  const slug = briefing?.character?.slug || session.character_slug;
   const character = session.mode === 'method_training' ? 'mentor' : slug === 'demo-igor' || /игор/i.test(name) ? 'igor' : 'anna';
   return <div className="section-wrap dialog-page">
     <Link className="back-link" to={back}>← Назад</Link>
-    <div className="dialog-heading"><div><span className="eyebrow">{session.mode === 'story' ? 'Сюжет' : 'Тренировка'}</span><h1>{name}</h1><p>{briefing?.title || custom?.situation}</p></div><span className="pill">{session.state.turn || 0} реплик</span></div>
+    <div className="dialog-heading"><div><span className="eyebrow">{session.mode === 'story' ? 'Сюжет' : 'Тренировка'}</span><h1>{name}</h1><p>{briefing?.title || session.mission_title || custom?.situation}</p></div><span className="pill">{session.state.turn || 0} реплик</span></div>
     <div className="dialog-layout"><aside className="dialog-brief"><span className="eyebrow">Ваша задача</span><h2>{goal}</h2>
       {custom && <dl><dt>Ваша роль</dt><dd>{custom.player_role}</dd><dt>Собеседник</dt><dd>{custom.opponent_role}</dd></dl>}
       {(session.ai_mode !== 'mock' || choiceTraining) && <div className="game-state"><span>Контакт {session.state.contact ?? 0}</span><span>Напряжение {session.state.tension ?? 0}</span><span>Прогресс {session.state.progress ?? 0}</span></div>}

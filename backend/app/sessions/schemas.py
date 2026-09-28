@@ -51,6 +51,10 @@ class SessionResponse(BaseModel):
 
     final_result: dict[str, Any] | None = None
     ai_mode: str
+    mission_title: str | None = None
+    mission_task: str | None = None
+    character_name: str | None = None
+    character_slug: str | None = None
 
     started_at: datetime
     last_activity_at: datetime

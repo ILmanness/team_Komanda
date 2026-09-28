@@ -79,6 +79,10 @@ export type GameSession = {
   status: 'active' | 'completed' | 'failed' | 'abandoned' | 'needs_review';
   mission_id: string | null;
   character_id: string | null;
+  mission_title?: string | null;
+  mission_task?: string | null;
+  character_name?: string | null;
+  character_slug?: string | null;
   custom_context: CustomSessionSettings | null;
   state: { turn?: number; contact?: number; tension?: number; progress?: number; score?: number; node_id?: string };
   final_result: { result?: string; reason?: string; score?: number } | null;
