@@ -1,5 +1,13 @@
-from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.config import get_settings
 
-engine = create_engine(get_settings().database_url, pool_pre_ping=True)
+
+engine: AsyncEngine = create_async_engine(
+    get_settings().database_url,
+    pool_pre_ping=True,
+)
+
+
+async def dispose_engine() -> None:
+    await engine.dispose()

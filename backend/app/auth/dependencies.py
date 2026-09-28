@@ -27,11 +27,11 @@ def get_current_user_id(
         ) from None
 
 
-def get_current_user(
+async def get_current_user(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
 ):
-    with engine.connect() as connection:
-        result = connection.execute(
+    async with engine.connect() as connection:
+        result = await connection.execute(
             text(
                 """
                 SELECT

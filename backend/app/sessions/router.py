@@ -27,12 +27,12 @@ router = APIRouter(
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 
 
-def _get_session(
+async def _get_session(
     session_id: UUID,
     user_id: UUID,
 ):
-    with engine.connect() as connection:
-        row = connection.execute(
+    async with engine.connect() as connection:
+        row = (await connection.execute(
             text(
                 """
                 SELECT
@@ -59,7 +59,7 @@ def _get_session(
                 "session_id": session_id,
                 "user_id": user_id,
             },
-        ).mappings().first()
+        )).mappings().first()
 
     if row is None:
         raise HTTPException(
@@ -71,9 +71,9 @@ def _get_session(
 
 
 @router.get("", response_model=list[SessionListItem])
-def list_sessions(current_user: CurrentUser):
-    with engine.connect() as connection:
-        rows = connection.execute(text("""
+async def list_sessions(current_user: CurrentUser):
+    async with engine.connect() as connection:
+        rows = (await connection.execute(text("""
             SELECT s.id, s.mode, s.status, s.mission_id, m.title AS mission_title,
                    s.custom_context, s.state, s.final_result, s.started_at, s.last_activity_at
             FROM game_sessions AS s
@@ -81,7 +81,7 @@ def list_sessions(current_user: CurrentUser):
             WHERE s.user_id = :user_id AND s.history_purged_at IS NULL
             ORDER BY s.last_activity_at DESC
             LIMIT 30
-        """), {"user_id": current_user["id"]}).mappings().all()
+        """), {"user_id": current_user["id"]})).mappings().all()
     return [SessionListItem(**dict(row)) for row in rows]
 
 
@@ -90,7 +90,7 @@ def list_sessions(current_user: CurrentUser):
     response_model=CreateSessionResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_session(
+async def create_session(
     data: CreateSessionRequest,
     current_user: CurrentUser,
 ):
@@ -122,13 +122,13 @@ def create_session(
                 detail="custom_context is required for custom sessions",
             )
 
-    with engine.begin() as connection:
+    async with engine.begin() as connection:
 
         mission = None
 
         if data.mode in ("story", "method_training"):
 
-            mission = connection.execute(
+            mission = (await connection.execute(
                 text(
                     """
                     SELECT
@@ -150,7 +150,7 @@ def create_session(
                     "mission_id": data.mission_id,
                     "mode": data.mode,
                 },
-            ).mappings().first()
+            )).mappings().first()
 
             if mission is None:
                 raise HTTPException(
@@ -159,7 +159,7 @@ def create_session(
                 )
 
             if data.mode == 'story':
-                progress = get_story_progress(connection, mission['storyline_id'], user_id)
+                progress = await get_story_progress(connection, mission['storyline_id'], user_id)
                 if not any(item['mission_id'] == mission['id'] and item['unlocked'] for item in progress):
                     raise HTTPException(status_code=403, detail='Complete the previous story mission first')
 
@@ -180,7 +180,7 @@ def create_session(
 
         if character_id is not None:
 
-            character = connection.execute(
+            character = (await connection.execute(
                 text(
                     """
                     SELECT
@@ -197,7 +197,7 @@ def create_session(
                 {
                     "id": character_id,
                 },
-            ).mappings().first()
+            )).mappings().first()
 
             if character is None:
                 raise HTTPException(
@@ -209,7 +209,7 @@ def create_session(
 
         if data.paei_profile_id is not None:
 
-            paei = connection.execute(
+            paei = (await connection.execute(
                 text(
                     """
                     SELECT
@@ -229,7 +229,7 @@ def create_session(
                 {
                     "id": data.paei_profile_id,
                 },
-            ).mappings().first()
+            )).mappings().first()
 
             if paei is None:
                 raise HTTPException(
@@ -241,7 +241,7 @@ def create_session(
 
         if data.difficulty_profile_id is not None:
 
-            difficulty = connection.execute(
+            difficulty = (await connection.execute(
                 text(
                     """
                     SELECT
@@ -257,7 +257,7 @@ def create_session(
                 {
                     "id": data.difficulty_profile_id,
                 },
-            ).mappings().first()
+            )).mappings().first()
 
             if difficulty is None:
                 raise HTTPException(
@@ -357,7 +357,7 @@ def create_session(
                 "context": data.custom_context,
             }
 
-        session = connection.execute(
+        session = (await connection.execute(
             text(
                 """
                 INSERT INTO game_sessions (
@@ -409,7 +409,7 @@ def create_session(
                 "state": Jsonb(initial_state),
                 "config_snapshot": Jsonb(config_snapshot),
             },
-        ).mappings().one()
+        )).mappings().one()
 
         opening_message = None
 
@@ -421,7 +421,7 @@ def create_session(
 
         if opening_message:
 
-            connection.execute(
+            await connection.execute(
                 text(
                     """
                     INSERT INTO session_messages (
@@ -455,11 +455,11 @@ def create_session(
     "/{session_id}",
     response_model=SessionResponse,
 )
-def get_session(
+async def get_session(
     session_id: UUID,
     current_user: CurrentUser,
 ):
-    return _get_session(
+    return await _get_session(
         session_id=session_id,
         user_id=current_user["id"],
     )
@@ -469,18 +469,18 @@ def get_session(
     "/{session_id}/messages",
     response_model=SessionMessagesResponse,
 )
-def get_session_messages(
+async def get_session_messages(
     session_id: UUID,
     current_user: CurrentUser,
 ):
-    _get_session(
+    await _get_session(
         session_id=session_id,
         user_id=current_user["id"],
     )
 
-    with engine.connect() as connection:
+    async with engine.connect() as connection:
 
-        rows = connection.execute(
+        rows = (await connection.execute(
             text(
                 """
                 SELECT
@@ -501,7 +501,7 @@ def get_session_messages(
             {
                 "session_id": session_id,
             },
-        ).mappings().all()
+        )).mappings().all()
 
     return SessionMessagesResponse(
         session_id=session_id,
@@ -516,13 +516,13 @@ def get_session_messages(
     "/{session_id}/finish",
     response_model=FinishSessionResponse,
 )
-def finish_session(
+async def finish_session(
     session_id: UUID,
     current_user: CurrentUser,
 ):
-    with engine.begin() as connection:
+    async with engine.begin() as connection:
 
-        session = connection.execute(
+        session = (await connection.execute(
             text(
                 """
                 SELECT
@@ -540,7 +540,7 @@ def finish_session(
                 "session_id": session_id,
                 "user_id": current_user["id"],
             },
-        ).mappings().first()
+        )).mappings().first()
 
         if session is None:
             raise HTTPException(
@@ -563,7 +563,7 @@ def finish_session(
             "completed_by": "player",
         }
 
-        updated = connection.execute(
+        updated = (await connection.execute(
             text(
                 """
                 UPDATE game_sessions
@@ -588,6 +588,6 @@ def finish_session(
                 "user_id": current_user["id"],
                 "final_result": Jsonb(final_result),
             },
-        ).mappings().one()
+        )).mappings().one()
 
     return FinishSessionResponse(**dict(updated))
