@@ -1,5 +1,6 @@
 """Idempotent published demo content; never overwrites editorial content."""
 import argparse
+import asyncio
 from uuid import NAMESPACE_URL, uuid5
 
 from psycopg.types.json import Jsonb
@@ -12,15 +13,15 @@ def demo_id(key: str):
     return uuid5(NAMESPACE_URL, f'negotiation-arena-demo:{key}')
 
 
-def insert(connection, sql: str, params: dict) -> bool:
-    return connection.execute(text(sql), params).scalar_one_or_none() is not None
+async def insert(connection, sql: str, params: dict) -> bool:
+    return (await connection.execute(text(sql), params)).scalar_one_or_none() is not None
 
 
-def seed() -> dict[str, int]:
+async def seed() -> dict[str, int]:
     counts = {'knowledge': 0, 'characters': 0, 'profiles': 0, 'storylines': 0, 'missions': 0}
-    with engine.begin() as connection:
+    async with engine.begin() as connection:
         topic = demo_id('knowledge:negotiation')
-        counts['knowledge'] += insert(connection, '''
+        counts['knowledge'] += await insert(connection, '''
             INSERT INTO knowledge_items(id, slug, item_type, title, summary, body, status)
             VALUES (:id, 'demo-negotiation', 'topic', 'Демо · Основы переговоров',
                     'Вопросы, интересы и варианты решения.',
@@ -34,7 +35,7 @@ def seed() -> dict[str, int]:
             (anna, 'demo-anna', 'Анна', 'Руководитель проекта', 'Спокойно уточняет причины задержки.'),
             (igor, 'demo-igor', 'Игорь', 'Заказчик', 'Ценит конкретные сроки и прозрачность.'),
         ]:
-            counts['characters'] += insert(connection, '''
+            counts['characters'] += await insert(connection, '''
                 INSERT INTO characters(id, slug, name, role_title, description, base_prompt)
                 VALUES (:id, :slug, :name, :role, :description, :prompt)
                 ON CONFLICT DO NOTHING RETURNING id
@@ -43,20 +44,20 @@ def seed() -> dict[str, int]:
 
         paei = demo_id('paei:balanced')
         difficulty = demo_id('difficulty:normal')
-        counts['profiles'] += insert(connection, '''
+        counts['profiles'] += await insert(connection, '''
             INSERT INTO paei_profiles(id, code, leading_letter, p_value, a_value, e_value, i_value,
                                       prompt_rules)
             VALUES (:id, 'DEMO_P', 'P', 65, 55, 45, 50, 'Предпочитает конкретные действия.')
             ON CONFLICT DO NOTHING RETURNING id
         ''', {'id': paei})
-        counts['profiles'] += insert(connection, '''
+        counts['profiles'] += await insert(connection, '''
             INSERT INTO difficulty_profiles(id, code, title, prompt_rules, settings)
             VALUES (:id, 'DEMO_NORMAL', 'Демо · Обычная', 'Реагируй естественно.', :settings)
             ON CONFLICT DO NOTHING RETURNING id
         ''', {'id': difficulty, 'settings': Jsonb({'max_turns': 20})})
 
         storyline = demo_id('storyline:first-week')
-        counts['storylines'] += insert(connection, '''
+        counts['storylines'] += await insert(connection, '''
             INSERT INTO storylines(id, slug, title, description, status)
             VALUES (:id, 'demo-first-week', 'Демо · Первая неделя',
                     'Два разговора о сроках и доверии в новой команде.', 'published')
@@ -107,7 +108,7 @@ def seed() -> dict[str, int]:
             },
         ]
         for mission in missions:
-            counts['missions'] += insert(connection, '''
+            counts['missions'] += await insert(connection, '''
                 INSERT INTO missions(id, storyline_id, knowledge_item_id, character_id,
                                      mission_type, interaction_type, branch_key, order_index,
                                      title, task, context, config, status)
@@ -125,8 +126,8 @@ def main() -> None:
     if not args.apply:
         print('Dry run. Pass --apply to insert demo content.')
         return
-    print(seed())
+    print(asyncio.run(seed()))
 
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())

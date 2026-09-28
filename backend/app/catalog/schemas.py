@@ -55,6 +55,7 @@ class MissionDetail(MissionListItem):
 
 class CharacterOption(BaseModel):
     id: UUID
+    slug: str
     name: str
     role_title: str
     description: str

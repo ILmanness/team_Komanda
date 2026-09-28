@@ -1,5 +1,7 @@
 from copy import deepcopy
-from typing import Any
+from typing import Any, ClassVar
+
+from app.game.evaluator_contract import TurnEvaluation
 
 
 class GameEngine:
@@ -8,12 +10,25 @@ class GameEngine:
     MIN_VALUE = 0
     MAX_VALUE = 100
 
+    # Draft scoring_and_game_state.md §10.1; resistance is stored as tension.
+    ACTION_DELTAS: ClassVar[dict[str, tuple[int, int, int, int, int]]] = {
+        'strong_positive': (8, -8, 12, 12, 0),
+        'positive': (5, -5, 8, 8, 0),
+        'neutral': (0, 0, 2, 0, 0),
+        'negative': (-6, 6, 0, -7, 0),
+        'critical_error': (-15, 12, -5, -15, 1),
+        'recovery_action': (15, -10, 5, 5, 0),
+    }
+
     def apply_evaluation(
         self,
         *,
         state: dict[str, Any],
         evaluation: dict[str, Any],
     ) -> dict[str, Any]:
+
+        if evaluation.get('schema_version') == 'ai10-v1':
+            return self._apply_structured(state=state, evaluation=evaluation)
 
         new_state = deepcopy(state)
 
@@ -61,6 +76,42 @@ class GameEngine:
             + 1
         )
 
+        return new_state
+
+    def _apply_structured(
+        self,
+        *,
+        state: dict[str, Any],
+        evaluation: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Only the engine turns a validated event into numerical changes."""
+        result = TurnEvaluation.model_validate(evaluation)
+        contact, tension, progress, quality, critical = self.ACTION_DELTAS[
+            result.proposed_event.action_type
+        ]
+        if result.intent == 'unknown' and not result.observations.features:
+            contact = tension = progress = quality = critical = 0
+        new_state = deepcopy(state)
+        for key, change in (
+            ('contact', contact),
+            ('tension', tension),
+            ('progress', progress),
+        ):
+            new_state[key] = self._bounded_update(new_state.get(key, 0), change)
+        new_state['negotiation_quality'] = self._bounded_update(
+            new_state.get('negotiation_quality', 50), quality,
+        )
+        new_state['critical_errors'] = self._to_int(
+            new_state.get('critical_errors', 0)
+        ) + critical
+        new_state['turn'] = self._to_int(new_state.get('turn', 0)) + 1
+        history = new_state.get('profile_fit_history')
+        if not isinstance(history, list):
+            history = []
+        new_state['profile_fit_history'] = [
+            *history,
+            result.profile_fit.model_dump(),
+        ]
         return new_state
 
     def check_end_conditions(

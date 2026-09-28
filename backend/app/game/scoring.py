@@ -30,7 +30,11 @@ class Scoring:
 
         quality = 0.0
 
-        if evaluation:
+        if 'negotiation_quality' in state and (
+            evaluation is None or evaluation.get('schema_version') == 'ai10-v1'
+        ):
+            quality = self._to_int(state.get('negotiation_quality', 50)) / 100
+        elif evaluation:
             try:
                 quality = float(
                     evaluation.get("quality", 0.0)

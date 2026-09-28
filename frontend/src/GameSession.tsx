@@ -1,35 +1,14 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, GameMessage, GameOptions, GameSession, MissionBriefing, sessionSocketUrl } from './api';
 import { useAuth } from './auth-context';
+import { NovelLine, NovelStage } from './NovelStage';
 
 function errorText(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return 'Срок входа истёк. Войдите снова.';
   if (cause instanceof ApiError && cause.status === 404) return 'Этот разговор не найден.';
   if (cause instanceof ApiError && cause.status === 403) return 'Эта сцена пока закрыта. Сначала пройдите предыдущую миссию.';
   return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером. Попробуйте ещё раз.';
-}
-
-const emotions: Record<string, string> = {
-  neutral: 'Спокойно', warm: 'Доброжелательно', tense: 'Напряжённо', angry: 'Раздражённо',
-};
-
-function NovelStage({ messages, name, playerName }: { messages: GameMessage[]; name: string; playerName: string }) {
-  const visible = messages.filter(item => item.role !== 'system' && item.processing_status === 'completed');
-  const [page, setPage] = useState(0);
-  useEffect(() => { setPage(Math.max(0, visible.length - 1)); }, [visible.length]);
-  const current = visible[page];
-  const speaking = current?.role === 'user' ? 'player' : 'opponent';
-  const emotion = current?.role === 'assistant' ? current.emotion || 'neutral' : 'neutral';
-  return <section className="novel-stage" data-speaking={speaking} data-emotion={emotion} aria-label="Сцена разговора">
-    <div className="novel-scenery" aria-hidden="true" />
-    <div className="novel-opponent" aria-label={`Собеседник ${name}`}><div className="novel-silhouette"><span className="novel-silhouette-head" /><span className="novel-silhouette-body" /></div><span className="novel-character-caption">{name}</span></div>
-    <div className="novel-player" aria-label="Персонаж игрока"><img src="/images/player-faceless.png" alt="" /><span className="novel-character-caption">Вы</span></div>
-    <div className="novel-dialogue" aria-live="polite"><div className="novel-dialogue-head"><div><span className="novel-speaker">{current?.role === 'user' ? playerName : name}</span>{current?.role === 'assistant' && <span className="novel-emotion">{emotions[emotion] || emotions.neutral}</span>}</div><span className="novel-count">{visible.length ? `${page + 1} / ${visible.length}` : 'Начало сцены'}</span></div>
-      <p>{current?.content || 'Собеседник ждёт вашего первого ответа.'}</p>
-      {visible.length > 1 && <div className="novel-pages"><button type="button" onClick={() => setPage(value => Math.max(0, value - 1))} disabled={page === 0}>← Назад</button><button type="button" onClick={() => setPage(value => Math.min(visible.length - 1, value + 1))} disabled={page === visible.length - 1}>Далее →</button></div>}
-    </div>
-  </section>;
 }
 
 export function MissionSetup({ mode }: { mode: 'story' | 'method_training' }) {
@@ -61,30 +40,35 @@ export function MissionSetup({ mode }: { mode: 'story' | 'method_training' }) {
     setPending(true);
     setError('');
     try {
+      const guided = briefing?.interaction_type === 'guided_training';
       const created = await api.createSession(token, {
         mode, mission_id: id,
-        paei_profile_id: String(form.get('paei_profile_id')),
-        difficulty_profile_id: String(form.get('difficulty_profile_id')),
+        ...(guided ? {} : {
+          paei_profile_id: String(form.get('paei_profile_id')),
+          difficulty_profile_id: String(form.get('difficulty_profile_id')),
+        }),
       });
-      navigate(`/session/${created.id}`);
+      navigate(guided ? `/training/guided/${created.id}` : `/session/${created.id}`);
     } catch (cause) { setError(errorText(cause)); }
     finally { setPending(false); }
   }
 
   const back = mode === 'story' ? '/story' : '/training';
   if (!briefing || !options) return <section className="section-wrap content-section custom-loading"><Link className="back-link" to={back}>← Назад</Link><div className="notice" role="status">{error || 'Загружаем сценарий…'}</div></section>;
-  const ready = options.paei_profiles.length > 0 && options.difficulty_profiles.length > 0 && briefing.character !== null;
+  const guided = briefing.interaction_type === 'guided_training';
+  const ready = guided || (options.paei_profiles.length > 0 && options.difficulty_profiles.length > 0 && briefing.character !== null);
   return <div className="section-wrap custom-page mission-setup">
     <Link className="back-link" to={back}>← Назад</Link>
     <div className="custom-page-heading"><span className="eyebrow">{mode === 'story' ? 'Сюжетная сцена' : 'Тренировка'}</span><h1>{briefing.title}</h1><p>{briefing.task}</p></div>
-    <div className="mission-setup-layout"><aside className="mission-character"><img src={mode === 'story' ? '/images/office-story-scene.png' : '/images/office-training-scene.png'} alt="Персонажи в офисе" /><div><span className="eyebrow">Собеседник</span><h2>{briefing.character?.name || 'Пока не назначен'}</h2><p>{briefing.character?.role_title}</p><p>{briefing.character?.description}</p></div></aside>
-      <form className="custom-form" onSubmit={start}><span className="form-section-name">Перед разговором</span>
+    <div className="mission-setup-layout"><aside className="mission-character"><img src={mode === 'story' ? '/images/office-story-scene.png' : '/images/office-training-scene.png'} alt="Персонажи в офисе" /><div><span className="eyebrow">{guided ? 'Формат' : 'Собеседник'}</span><h2>{guided ? 'Несколько решений' : briefing.character?.name || 'Пока не назначен'}</h2>{guided ? <p>Разберите рабочие эпизоды, посмотрите реакцию собеседника и объяснения наставника.</p> : <><p>{briefing.character?.role_title}</p><p>{briefing.character?.description}</p></>}</div></aside>
+      <form className="custom-form" onSubmit={start}><span className="form-section-name">{guided ? 'Как проходит тренировка' : 'Перед разговором'}</span>
+        {guided ? <p className="form-note">Выберите ответ в нескольких рабочих ситуациях. Если решение не учитывает все условия, наставник даст подсказку и ещё одну попытку. В конце ответьте на новый вопрос своими словами.</p> : <>
         <label>Профиль PAEI<select name="paei_profile_id" required>{options.paei_profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.code} · {profile.leading_letter}</option>)}</select></label>
-        <label>Сложность<select name="difficulty_profile_id" required>{options.difficulty_profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.title}</option>)}</select></label>
+        <label>Сложность<select name="difficulty_profile_id" required>{options.difficulty_profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.title}</option>)}</select></label></>}
         {!ready && <p className="form-note">Миссию можно будет начать, когда для неё добавят персонажа и профили игры.</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
         {!user && !checking && <p className="form-note">Для сохранения результата нужен аккаунт.</p>}
-        <button className="button primary" type="submit" disabled={!ready || pending || checking}>{pending ? 'Начинаем…' : 'Начать разговор'} <span>→</span></button>
+        <button className="button primary" type="submit" disabled={!ready || pending || checking}>{pending ? 'Начинаем…' : guided ? 'Начать тренировку' : 'Начать разговор'} <span>→</span></button>
       </form>
     </div>
   </div>;
@@ -103,6 +87,8 @@ export function GameDialog() {
   const [text, setText] = useState('');
   const [shownHints, setShownHints] = useState(0);
   const [error, setError] = useState('');
+  const [optimistic, setOptimistic] = useState('');
+  const [streamed, setStreamed] = useState('');
   const socketRef = useRef<WebSocket | null>(null);
   const pendingKey = useRef<{ text: string; key: string } | null>(null);
 
@@ -126,7 +112,7 @@ export function GameDialog() {
   }, [session?.mission_id]);
 
   useEffect(() => {
-    if (!user || session?.status !== 'active') return;
+    if (!user || session?.status !== 'active' || session.state.node_id) return;
     const token = sessionStorage.getItem('arena_token');
     if (!token) return;
     const socket = new WebSocket(sessionSocketUrl(token, id));
@@ -134,13 +120,15 @@ export function GameDialog() {
     setConnection('connecting');
     socket.onopen = () => setConnection('ready');
     socket.onmessage = async message => {
-      let event: { type?: string; code?: string; message?: string };
+      let event: { type?: string; code?: string; message?: string; content?: string; emotion?: string };
       try { event = JSON.parse(message.data); } catch { return; }
+      if (event.type === 'opponent.delta' && event.content) setStreamed(value => value + event.content);
       if (event.type === 'state.update' || event.type === 'message.duplicate' || event.type === 'error') {
         try {
           const [details, history] = await Promise.all([api.session(token, id), api.sessionMessages(token, id)]);
           setSession(details);
           setMessages(history.messages);
+          setOptimistic(''); setStreamed('');
           if (event.type !== 'error') { setText(''); pendingKey.current = null; }
         } catch (cause) { setError(errorText(cause)); }
         setPending(false);
@@ -160,6 +148,8 @@ export function GameDialog() {
     const key = pendingKey.current?.text === content ? pendingKey.current.key : crypto.randomUUID();
     pendingKey.current = { text: content, key };
     setPending(true);
+    setOptimistic(content);
+    setStreamed('');
     setError('');
     socket.send(JSON.stringify({ type: 'player.message', idempotency_key: key, content }));
   }
@@ -170,6 +160,8 @@ export function GameDialog() {
     const key = pendingKey.current?.text === choiceId ? pendingKey.current.key : crypto.randomUUID();
     pendingKey.current = { text: choiceId, key };
     setPending(true); setError('');
+    setOptimistic(briefing?.choices.find(item => item.id === choiceId)?.text || choiceId);
+    setStreamed('');
     socket.send(JSON.stringify({ type: 'player.choice', idempotency_key: key, choice_id: choiceId }));
   }
 
@@ -188,6 +180,7 @@ export function GameDialog() {
   if (checking || loading) return <section className="section-wrap content-section custom-loading"><div className="notice" role="status">Открываем разговор…</div></section>;
   if (!user) return <section className="section-wrap content-section custom-loading"><div className="notice"><h1>Войдите, чтобы открыть разговор</h1><p>Он доступен только в аккаунте, где был начат.</p><button className="button primary" onClick={openAuth}>Войти <span>→</span></button></div></section>;
   if (!session) return <section className="section-wrap content-section custom-loading"><div className="notice error" role="alert">{error || 'Разговор не найден.'}</div><Link className="back-link" to="/training">← К тренировкам</Link></section>;
+  if (session.state.node_id) return <Navigate to={`/training/guided/${session.id}`} replace />;
 
   const custom = session.custom_context;
   const back = session.mode === 'story' ? '/story' : '/training';
@@ -198,6 +191,12 @@ export function GameDialog() {
   const storyReturn = briefing?.storyline_id ? `/story/${briefing.storyline_id}` : '/story';
   const nextLink = session.mode === 'story' ? storyReturn : session.mode === 'method_training' ? '/training' : '/account';
   const nextLabel = session.mode === 'story' ? 'К карте сюжета' : session.mode === 'method_training' ? 'К тренировкам' : 'В кабинет';
+  const completed = messages.filter(item => item.role !== 'system' && item.processing_status === 'completed');
+  const lines: NovelLine[] = completed.map((item, index) => ({ key: `${index}-${item.role}`, role: item.role as 'user' | 'assistant', content: item.content, emotion: item.emotion }));
+  if (optimistic) lines.push({ key: `${lines.length}-user`, role: 'user', content: optimistic });
+  if (streamed) lines.push({ key: `${lines.length}-assistant`, role: 'assistant', content: streamed });
+  const slug = briefing?.character?.slug;
+  const character = session.mode === 'method_training' ? 'mentor' : slug === 'demo-igor' || /игор/i.test(name) ? 'igor' : 'anna';
   return <div className="section-wrap dialog-page">
     <Link className="back-link" to={back}>← Назад</Link>
     <div className="dialog-heading"><div><span className="eyebrow">{session.mode === 'story' ? 'Сюжет' : 'Тренировка'}</span><h1>{name}</h1><p>{briefing?.title || custom?.situation}</p></div><span className="pill">{session.state.turn || 0} реплик</span></div>
@@ -205,7 +204,7 @@ export function GameDialog() {
       {custom && <dl><dt>Ваша роль</dt><dd>{custom.player_role}</dd><dt>Собеседник</dt><dd>{custom.opponent_role}</dd></dl>}
       {(session.ai_mode !== 'mock' || choiceTraining) && <div className="game-state"><span>Контакт {session.state.contact ?? 0}</span><span>Напряжение {session.state.tension ?? 0}</span><span>Прогресс {session.state.progress ?? 0}</span></div>}
       {session.mode === 'custom' && <Link to="/training/custom" className="text-link">Новый свой диалог ↗</Link>}</aside>
-      <section className="dialog-main" aria-label="Диалог"><NovelStage messages={messages} name={name} playerName={user.display_name} />
+      <section className="dialog-main" aria-label="Диалог"><NovelStage lines={lines} name={session.mode === 'method_training' ? 'Старшая коллега' : name} playerName={user.display_name} character={character} waiting={pending && !streamed} />
         {session.ai_mode === 'mock' && !choiceTraining && <p className="dialog-demo-note">Демо-режим: ответы собеседника заготовлены. Игровая оценка здесь не отражает качество переговоров.</p>}
         {active && choiceTraining ? <div className="dialog-compose"><strong>Как вы ответите?</strong><div className="training-choices">{briefing.choices.map((choice, index) => <button type="button" key={choice.id} disabled={pending || connection !== 'ready'} onClick={() => choose(choice.id)}><span>{String.fromCharCode(65 + index)}</span>{choice.text}</button>)}</div>
           {briefing.hints.length > 0 && <div className="training-hints"><button className="text-link" type="button" onClick={() => setShownHints(value => Math.min(value + 1, briefing.hints.length))} disabled={shownHints >= briefing.hints.length}>Показать подсказку ({shownHints}/{briefing.hints.length}) ↗</button>{briefing.hints.slice(0, shownHints).map((hint, index) => <p key={index}>{hint}</p>)}</div>}

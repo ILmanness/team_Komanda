@@ -8,6 +8,7 @@ type Filter = 'all' | 'story' | 'method_training' | 'custom';
 
 function resultLabel(dialog: GameSessionSummary) {
   if (dialog.status === 'active') return 'В процессе';
+  if (dialog.status === 'needs_review') return 'Ожидает проверки';
   if (dialog.final_result?.result === 'success') return 'Пройдено';
   if (dialog.status === 'failed' || dialog.final_result?.result === 'failure') return 'Не пройдено';
   return 'Завершено';
@@ -59,7 +60,7 @@ export function AccountPage() {
     </div>
     {error && <div className="notice error" role="alert">{error}</div>}
     <section className="account-history"><div className="account-section-title"><span className="eyebrow">История</span><h2>Ваши разговоры</h2></div><div className="account-filters" role="group" aria-label="Фильтр разговоров">{([['all', 'Все'], ['story', 'Сюжет'], ['method_training', 'Тренировки'], ['custom', 'Свои']] as const).map(([value, label]) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)} aria-pressed={filter === value}>{label}</button>)}</div>
-      {loading ? <div className="notice">Загружаем разговоры…</div> : visible.length ? <div className="saved-dialog-list">{visible.map(dialog => <Link className="saved-dialog" to={`/session/${dialog.id}`} key={dialog.id}><div><span className="eyebrow">{dialog.mode === 'story' ? 'Сюжет' : dialog.mode === 'method_training' ? 'Тренировка' : 'Свой диалог'} · {resultLabel(dialog)}</span><h3>{dialog.mission_title || dialog.custom_context?.opponent_name || dialog.custom_context?.opponent_role || 'Свой диалог'}</h3><p>{dateFormat.format(new Date(dialog.started_at))}</p></div><span className="saved-dialog-progress">{dialog.state.turn || 0} реплик <span aria-hidden="true">↗</span></span></Link>)}</div> : <div className="notice">{filter === 'all' ? 'Вы ещё не начинали разговоров.' : 'В этом разделе пока нет разговоров.'}</div>}
+      {loading ? <div className="notice">Загружаем разговоры…</div> : visible.length ? <div className="saved-dialog-list">{visible.map(dialog => <Link className="saved-dialog" to={dialog.state.node_id ? `/training/guided/${dialog.id}` : `/session/${dialog.id}`} key={dialog.id}><div><span className="eyebrow">{dialog.mode === 'story' ? 'Сюжет' : dialog.mode === 'method_training' ? 'Тренировка' : 'Свой диалог'} · {resultLabel(dialog)}</span><h3>{dialog.mission_title || dialog.custom_context?.opponent_name || dialog.custom_context?.opponent_role || 'Свой диалог'}</h3><p>{dateFormat.format(new Date(dialog.started_at))}</p></div><span className="saved-dialog-progress">{dialog.state.turn || 0} {dialog.state.node_id ? 'решений' : 'реплик'} <span aria-hidden="true">↗</span></span></Link>)}</div> : <div className="notice">{filter === 'all' ? 'Вы ещё не начинали разговоров.' : 'В этом разделе пока нет разговоров.'}</div>}
     </section>
   </div>;
 }

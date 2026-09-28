@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import time
+import asyncio
 
 from sqlalchemy import text
 
@@ -12,45 +13,45 @@ BATCH_SIZE = 200
 logger = logging.getLogger(__name__)
 
 
-def cleanup(apply: bool = False) -> dict[str, int]:
+async def cleanup(apply: bool = False) -> dict[str, int]:
     settings = get_settings()
     counts = {'abandoned': 0, 'histories_purged': 0, 'sessions_deleted': 0}
-    with engine.connect() as connection:
-        transaction = connection.begin()
+    async with engine.connect() as connection:
+        transaction = await connection.begin()
         try:
-            if not connection.execute(text('SELECT pg_try_advisory_xact_lock(18092026)')).scalar():
-                transaction.rollback()
+            if not (await connection.execute(text('SELECT pg_try_advisory_xact_lock(18092026)'))).scalar():
+                await transaction.rollback()
                 return counts
-            idle = connection.execute(text('''
+            idle = (await connection.execute(text('''
                 SELECT id FROM game_sessions
                 WHERE status = 'active'
                   AND last_activity_at < now() - make_interval(days => :days)
                 ORDER BY last_activity_at LIMIT :batch FOR UPDATE SKIP LOCKED
-            '''), {'days': settings.active_session_idle_days, 'batch': BATCH_SIZE}).scalars().all()
+            '''), {'days': settings.active_session_idle_days, 'batch': BATCH_SIZE})).scalars().all()
             for session_id in idle:
-                connection.execute(text('''
+                await connection.execute(text('''
                     UPDATE game_sessions SET status = 'abandoned', completed_at = now(),
                         lock_version = lock_version + 1 WHERE id = :id
                 '''), {'id': session_id})
             counts['abandoned'] = len(idle)
 
-            expired = connection.execute(text('''
+            expired = (await connection.execute(text('''
                 SELECT id FROM game_sessions WHERE status <> 'active'
                   AND completed_at <= now() - make_interval(days => :days)
                 ORDER BY completed_at LIMIT :batch FOR UPDATE SKIP LOCKED
-            '''), {'days': settings.session_retention_days, 'batch': BATCH_SIZE}).scalars().all()
+            '''), {'days': settings.session_retention_days, 'batch': BATCH_SIZE})).scalars().all()
             for session_id in expired:
-                connection.execute(text('DELETE FROM game_sessions WHERE id = :id'), {'id': session_id})
+                await connection.execute(text('DELETE FROM game_sessions WHERE id = :id'), {'id': session_id})
             counts['sessions_deleted'] = len(expired)
 
-            histories = connection.execute(text('''
+            histories = (await connection.execute(text('''
                 SELECT id FROM game_sessions WHERE status <> 'active' AND history_purged_at IS NULL
                   AND completed_at <= now() - make_interval(days => :days)
                 ORDER BY completed_at LIMIT :batch FOR UPDATE SKIP LOCKED
-            '''), {'days': settings.history_retention_days, 'batch': BATCH_SIZE}).scalars().all()
+            '''), {'days': settings.history_retention_days, 'batch': BATCH_SIZE})).scalars().all()
             for session_id in histories:
-                connection.execute(text('DELETE FROM session_messages WHERE session_id = :id'), {'id': session_id})
-                connection.execute(text('''
+                await connection.execute(text('DELETE FROM session_messages WHERE session_id = :id'), {'id': session_id})
+                await connection.execute(text('''
                     UPDATE game_sessions SET state = '{}', memory_summary = '{}',
                         custom_context = CASE WHEN mode = 'custom' THEN '{}'::jsonb ELSE NULL END,
                         config_snapshot = '{}', history_purged_at = now(),
@@ -58,11 +59,11 @@ def cleanup(apply: bool = False) -> dict[str, int]:
                 '''), {'id': session_id})
             counts['histories_purged'] = len(histories)
             if apply:
-                transaction.commit()
+                await transaction.commit()
             else:
-                transaction.rollback()
+                await transaction.rollback()
         except Exception:
-            transaction.rollback()
+            await transaction.rollback()
             raise
     return counts
 
@@ -74,7 +75,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     while True:
         try:
-            print(json.dumps({'apply': args.apply, **cleanup(args.apply)}), flush=True)
+            print(json.dumps({'apply': args.apply, **asyncio.run(cleanup(args.apply))}), flush=True)
         except Exception:
             if not args.loop:
                 raise

@@ -44,7 +44,7 @@ def get_user_id_from_websocket(
         return None
 
 
-def get_session(
+async def get_session(
     session_id: UUID,
     user_id: UUID,
 ):
@@ -52,9 +52,9 @@ def get_session(
     Получение сессии для WebSocket handshake.
     """
 
-    with engine.connect() as connection:
+    async with engine.connect() as connection:
 
-        row = connection.execute(
+        row = (await connection.execute(
             text(
                 """
                 SELECT
@@ -75,7 +75,7 @@ def get_session(
                 "session_id": session_id,
                 "user_id": user_id,
             },
-        ).mappings().first()
+        )).mappings().first()
 
     return dict(row) if row else None
 
@@ -93,7 +93,7 @@ async def session_websocket(
         await websocket.close(code=1008)
         return
 
-    session = get_session(session_id=session_id, user_id=user_id)
+    session = await get_session(session_id=session_id, user_id=user_id)
     if session is None:
         await websocket.close(code=1008)
         return
@@ -101,7 +101,7 @@ async def session_websocket(
     await websocket.accept()
 
 
-    session = get_session(
+    session = await get_session(
         session_id=session_id,
         user_id=user_id,
     )
@@ -156,7 +156,7 @@ async def session_websocket(
 
                 continue
 
-            session = get_session(
+            session = await get_session(
                 session_id=session_id,
                 user_id=user_id,
             )
@@ -220,6 +220,7 @@ async def session_websocket(
                         ),
                         evaluation_override=evaluation_override,
                         response_override=response_override,
+                        on_event=websocket.send_json,
                     )
                 )
 

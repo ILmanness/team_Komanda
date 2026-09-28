@@ -48,6 +48,19 @@ export type KnowledgeDetail = KnowledgeItem & {
   children: KnowledgeItem[];
 };
 
+export type KnowledgeProgress = {
+  completed_ids: string[];
+  latest_quizzes: { knowledge_item_id: string; score: number; question_count: number; created_at: string }[];
+};
+export type KnowledgeQuiz = {
+  id: string; title: string;
+  questions: { number: number; prompt: string; material_id: string | null; choices: { id: string; text: string }[] }[];
+};
+export type KnowledgeQuizResult = {
+  score: number; total: number; completed: boolean;
+  results: { number: number; material_id: string | null; selected: string; correct: string; is_correct: boolean; explanation: string }[];
+};
+
 export type CustomSessionSettings = {
   situation: string;
   player_role: string;
@@ -63,11 +76,11 @@ export type SessionMode = 'custom' | 'story' | 'method_training';
 export type GameSession = {
   id: string;
   mode: SessionMode;
-  status: 'active' | 'completed' | 'failed' | 'abandoned';
+  status: 'active' | 'completed' | 'failed' | 'abandoned' | 'needs_review';
   mission_id: string | null;
   character_id: string | null;
   custom_context: CustomSessionSettings | null;
-  state: { turn?: number; contact?: number; tension?: number; progress?: number; score?: number };
+  state: { turn?: number; contact?: number; tension?: number; progress?: number; score?: number; node_id?: string };
   final_result: { result?: string; reason?: string; score?: number } | null;
   ai_mode: 'mock' | 'compatible';
 };
@@ -86,7 +99,7 @@ export type AccountStats = {
 
 export type GameMessage = { id: string; sequence_number: number; role: 'user' | 'assistant' | 'system'; content: string; emotion?: 'neutral' | 'warm' | 'tense' | 'angry'; processing_status: string };
 
-export type CharacterOption = { id: string; name: string; role_title: string; description: string };
+export type CharacterOption = { id: string; slug: string; name: string; role_title: string; description: string };
 export type GameOptions = {
   characters: CharacterOption[];
   paei_profiles: { id: string; code: string; leading_letter: string }[];
@@ -102,6 +115,23 @@ export type MissionBriefing = {
   character: CharacterOption | null;
   choices: { id: string; text: string }[];
   hints: string[];
+};
+
+export type GuidedEvent = {
+  sequence_no: number; node_id: string; base_node_id: string; choice_id: string;
+  choice_text: string; assessment: 'correct' | 'partial' | 'incorrect';
+  effect: string | null; feedback_text: string; transition_notice: string | null;
+  attempt_stage: 'first' | 'retry'; resolution: string;
+};
+export type GuidedTraining = {
+  session_id: string; status: GameSession['status']; training_id: string; title: string;
+  node: { id: string; speaker: string; text: string; type: 'decision' | 'knowledge' | 'retry' | 'free_text'; goal: string };
+  choices: { id: 'a' | 'b' | 'c'; text: string }[];
+  events: GuidedEvent[];
+  criteria: { criterion_id: string; criterion: string }[];
+  example_answer: string | null;
+  final_result: { result?: string; answer?: string; criteria?: { criterion_id: string; status: string; evidence_quote: string; reason: string }[] } | null;
+  material_id: string;
 };
 
 export type AdminStoryline = Storyline & { status: string };
@@ -169,6 +199,17 @@ export const api = {
     request<Mission[]>(`/v1/missions?mission_type=${type}`, { signal }),
   knowledge: (signal?: AbortSignal) => request<KnowledgeItem[]>('/v1/knowledge', { signal }),
   knowledgeItem: (id: string, signal?: AbortSignal) => request<KnowledgeDetail>(`/v1/knowledge/${encodeURIComponent(id)}`, { signal }),
+  knowledgeProgress: (token: string, signal?: AbortSignal) => request<KnowledgeProgress>('/v1/knowledge/progress', {
+    signal, headers: { Authorization: `Bearer ${token}` },
+  }),
+  knowledgeQuiz: (id: string, signal?: AbortSignal) => request<KnowledgeQuiz>(`/v1/knowledge/${encodeURIComponent(id)}/quiz`, { signal }),
+  completeKnowledge: (token: string, id: string) => request<{ completed: boolean }>(`/v1/knowledge/${encodeURIComponent(id)}/complete`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  }),
+  submitKnowledgeQuiz: (token: string, id: string, answers: Record<string, string>) =>
+    request<KnowledgeQuizResult>(`/v1/knowledge/${encodeURIComponent(id)}/quiz`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ answers }),
+    }),
   gameOptions: (signal?: AbortSignal) => request<GameOptions>('/v1/game/options', { signal }),
   missionBriefing: (id: string, signal?: AbortSignal) => request<MissionBriefing>(`/v1/missions/${encodeURIComponent(id)}/briefing`, { signal }),
   sessions: (token: string, signal?: AbortSignal) => request<GameSessionSummary[]>('/v1/sessions', {
@@ -185,6 +226,15 @@ export const api = {
   }),
   finishSession: (token: string, id: string) => request<{ status: GameSession['status'] }>(`/v1/sessions/${encodeURIComponent(id)}/finish`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  }),
+  guided: (token: string, id: string, signal?: AbortSignal) => request<GuidedTraining>(`/v1/sessions/${encodeURIComponent(id)}/guided`, {
+    signal, headers: { Authorization: `Bearer ${token}` },
+  }),
+  guidedChoice: (token: string, id: string, node_id: string, choice_id: string) => request<GuidedTraining>(`/v1/sessions/${encodeURIComponent(id)}/guided/choice`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ node_id, choice_id }),
+  }),
+  guidedAnswer: (token: string, id: string, node_id: string, text: string) => request<GuidedTraining>(`/v1/sessions/${encodeURIComponent(id)}/guided/answer`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ node_id, text }),
   }),
   me: (token: string) => request<User>('/v1/users/me', { headers: { Authorization: `Bearer ${token}` } }),
   accountStats: (token: string, signal?: AbortSignal) => request<AccountStats>('/v1/users/me/stats', {

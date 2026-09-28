@@ -1,11 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom';
-import { api, ApiError, KnowledgeDetail, KnowledgeItem, Mission, Storyline, StorylineDetail, StoryProgress, User } from './api';
+import { api, ApiError, Mission, Storyline, StorylineDetail, StoryProgress, User } from './api';
 import { AuthContext, useAuth } from './auth-context';
 import { CustomTrainingForm } from './CustomTraining';
 import { GameDialog, MissionSetup } from './GameSession';
+import GuidedTrainingPage from './GuidedTraining';
 import { AdminPage } from './Admin';
 import { AccountPage } from './AccountPage';
+import { KnowledgeLibrary, KnowledgePage, KnowledgeQuizPage } from './KnowledgePages';
 import './styles.css';
 
 type Resource<T> = { data: T | null; loading: boolean; error: string | null };
@@ -134,7 +136,7 @@ function Training() {
   return <><section className="training-banner section-wrap"><div><span className="eyebrow">Один на один</span><h1>Тренировка</h1><p>В каждой тренировке вы разговариваете с одним собеседником. Выбирайте ситуацию и пробуйте новые решения.</p></div><img src="/images/office-training-scene.png" alt="Собеседница в переговорной" /></section>
     <section className="section-wrap custom-entry"><div><span className="eyebrow">Ваш сценарий</span><h2>Разговор на ваших условиях</h2><p>Опишите ситуацию, задайте цель и характер собеседника. После этого можно сразу начать диалог.</p></div><Link className="button primary" to="/training/custom">Создать свой диалог <span>↗</span></Link></section>
     <section className="section-wrap content-section"><div className="content-toolbar"><div><span className="eyebrow">Каталог тренировок</span><h2>Выберите сценарий</h2></div><span className="pill">{missions.data?.length ?? 0} доступно</span></div>
-      <ResourceView resource={missions} empty="Опубликованных тренировок пока нет. Как только появятся сценарии, они будут показаны здесь.">{items => <div className="list-grid">{items.map((mission: Mission) => <Link className="list-card" to={`/training/mission/${mission.id}`} key={mission.id}><div><span className="eyebrow">{mission.interaction_type === 'single_choice' ? 'Выбор ответа' : 'Диалог'}</span><h3>{mission.title}</h3><p>Откройте сценарий и настройте разговор.</p></div><span className="round-arrow">↗</span></Link>)}</div>}</ResourceView>
+      <ResourceView resource={missions} empty="Опубликованных тренировок пока нет. Как только появятся сценарии, они будут показаны здесь.">{items => <div className="list-grid">{items.map((mission: Mission) => <Link className="list-card" to={`/training/mission/${mission.id}`} key={mission.id}><div><span className="eyebrow">{mission.interaction_type === 'guided_training' ? 'Практика решений' : mission.interaction_type === 'single_choice' ? 'Выбор ответа' : 'Диалог'}</span><h3>{mission.title}</h3><p>{mission.interaction_type === 'guided_training' ? 'Несколько ситуаций, подсказки и ответ своими словами.' : 'Откройте сценарий и настройте разговор.'}</p></div><span className="round-arrow">↗</span></Link>)}</div>}</ResourceView>
     </section></>;
 }
 
@@ -159,39 +161,31 @@ function StoryDetailPage() {
     return () => controller.abort();
   }, [id, user?.id]);
   return <><PageIntro eyebrow="Карта сюжета" title={resource.data?.title || 'Сюжетная линия'} text={resource.data?.description || 'Изучаем доступные миссии и порядок прохождения.'} back="/story" />
-    <section className="section-wrap content-section"><ResourceView resource={resource} empty="Сюжет не найден.">{(story: StorylineDetail) => <><div className="content-toolbar"><h2>Миссии</h2><span className="pill">Миссий: {story.missions.length}</span></div>
-      {story.missions.length ? <div className="mission-timeline">{story.missions.map((mission, index) => {
-        const firstInBranch = !story.missions.slice(0, index).some(previous => previous.branch_key === mission.branch_key);
-        const state = progress?.missions.find(item => item.mission_id === mission.id);
-        const unlocked = state?.unlocked ?? firstInBranch;
-        const content = <><span className="timeline-node">{index + 1}</span><div><span className="eyebrow">{mission.branch_key === 'main' ? 'Основная линия' : mission.branch_key || 'Этап'} · {state?.completed ? 'Пройдено' : unlocked ? 'Доступно' : 'Закрыто'}</span><h3>{mission.title}</h3><p>{state?.completed ? 'Можно пройти ещё раз' : unlocked ? 'Открыть сцену и начать разговор' : 'Пройдите предыдущую миссию этой ветки'}</p></div><span className="round-arrow">{unlocked ? '↗' : '—'}</span></>;
-        return unlocked ? <Link className="timeline-item" to={`/story/mission/${mission.id}`} key={mission.id}>{content}</Link>
-          : <div className="timeline-item locked" key={mission.id} aria-label={`${mission.title} — закрыто`}>{content}</div>;
-      })}</div> : <div className="notice">В этой линии пока нет опубликованных миссий.</div>}</>}</ResourceView></section></>;
+    <section className="section-wrap content-section"><ResourceView resource={resource} empty="Сюжет не найден.">{(story: StorylineDetail) => <StoryMap story={story} progress={progress} />}</ResourceView></section></>;
 }
 
-function Knowledge() {
-  const resource = useResource('knowledge', api.knowledge);
-  const items = resource.data || [];
-  const roots = items.filter(item => item.parent_id === null);
-  return <><PageIntro eyebrow="Теория" title="База знаний" text="Материалы, методы и идеи, которые помогут подготовиться к следующему разговору." />
-    <section className="section-wrap content-section"><div className="content-toolbar"><div><span className="eyebrow">Библиотека</span><h2>Темы и материалы</h2></div><span className="pill">{items.length} материалов</span></div>
-      <ResourceView resource={resource} empty="Материалы пока не опубликованы. Загляните сюда позже.">{() => <div className="knowledge-list">{(roots.length ? roots : items).map((item) => <Link to={`/knowledge/${item.id}`} className="knowledge-row" key={item.id}><div><span className="eyebrow">{item.item_type === 'topic' ? 'Тема' : item.item_type === 'method' ? 'Метод' : 'Статья'}</span><h3>{item.title}</h3><p>{item.summary || 'Откройте материал, чтобы узнать подробнее.'}</p></div><span className="round-arrow">↗</span></Link>)}</div>}</ResourceView>
-    </section></>;
-}
-
-function KnowledgeDetailPage() {
-  const { id = '' } = useParams();
-  const resource = useResource(`knowledge-${id}`, signal => api.knowledgeItem(id, signal));
-  return <><PageIntro eyebrow="База знаний" title={resource.data?.title || 'Материал'} text={resource.data?.summary || 'Исследуйте материал и связанные темы.'} back="/knowledge" />
-    <section className="section-wrap content-section"><ResourceView resource={resource} empty="Материал не найден.">{(item: KnowledgeDetail) => <div className="article-layout"><article className="article-card"><span className="eyebrow">{item.item_type === 'topic' ? 'Тема' : item.item_type === 'method' ? 'Метод' : 'Статья'}</span><h2>{item.title}</h2>{item.body ? <div className="article-body">{item.body}</div> : <p className="muted">Текст материала пока не опубликован.</p>}</article>
-      <aside className="article-side"><span className="eyebrow">Следующий шаг</span><h3>Продолжайте изучение</h3><p>Читайте связанные материалы или вернитесь к списку тем.</p><Link className="button outline" to="/knowledge">Все темы <span>→</span></Link></aside>
-      {item.children.length > 0 && <div className="related"><h2>В этой теме</h2>{item.children.map((child: KnowledgeItem) => <Link key={child.id} to={`/knowledge/${child.id}`} className="related-link">{child.title}<span>↗</span></Link>)}</div>}</div>}</ResourceView></section></>;
+function StoryMap({ story, progress }: { story: StorylineDetail; progress: StoryProgress | null }) {
+  const branches = Array.from(story.missions.reduce((groups, mission) => {
+    const key = mission.branch_key || 'main';
+    groups.set(key, [...(groups.get(key) || []), mission]);
+    return groups;
+  }, new Map<string, Mission[]>()).entries());
+  const completed = progress?.missions.filter(mission => mission.completed).length || 0;
+  const branchTitle = (key: string) => ({ main: 'Основная линия', novice: 'Новичок', experienced: 'Опытный сотрудник', manager: 'Руководитель' }[key] || key.replace(/[_-]/g, ' '));
+  return <div className="story-map-layout"><div className="story-map-tracks"><div className="content-toolbar"><div><span className="eyebrow">Карта линии</span><h2>Выберите эпизод</h2></div><span className="pill">Миссий: {story.missions.length}</span></div>
+    {branches.length ? branches.map(([key, missions]) => <section className="story-branch" key={key} aria-label={branchTitle(key)}><h3>{branchTitle(key)}</h3><div className="story-branch-track">{missions.map((mission, index) => {
+      const state = progress?.missions.find(item => item.mission_id === mission.id);
+      const unlocked = state?.unlocked ?? index === 0;
+      const status = state?.completed ? 'Пройдено' : unlocked ? 'Доступно' : 'Закрыто';
+      const inner = <><span className="story-map-node">{String(index + 1).padStart(2, '0')}</span><strong>{mission.title}</strong><small>{status}</small></>;
+      return unlocked ? <Link className={`story-map-mission${state?.completed ? ' completed' : ''}`} title={mission.title} aria-label={`${mission.title} — ${status}`} to={`/story/mission/${mission.id}`} key={mission.id}>{inner}</Link>
+        : <div className="story-map-mission locked" title={mission.title} aria-label={`${mission.title} — ${status}`} key={mission.id}>{inner}</div>;
+    })}</div></section>) : <div className="notice">В этой линии пока нет опубликованных миссий.</div>}
+  </div><aside className="story-map-status"><span className="eyebrow">Статус линии</span><h2>{completed ? `${completed} из ${story.missions.length} пройдено` : 'Начните историю'}</h2><p>{completed ? 'Пройденные эпизоды можно открыть повторно. Новые становятся доступны после успешного разговора.' : 'Выберите доступный эпизод на карте. Следующие миссии открываются после успешного разговора.'}</p><div className="story-map-legend"><span><i className="available" /> Доступно</span><span><i className="done" /> Пройдено</span><span><i className="closed" /> Закрыто</span></div><Link className="button outline" to="/knowledge">База знаний <span>↗</span></Link></aside></div>;
 }
 
 function PvpSoon() {
-  return <><PageIntro eyebrow="Скоро" title="PvP арена" text="Здесь появятся переговорные поединки с другими игроками." back="/" />
-    <section className="section-wrap content-section"><div className="notice">Режим пока в разработке. Здесь появятся правила и возможность начать поединок.</div></section></>;
+  return <section className="pvp-page section-wrap"><div className="pvp-panel"><span className="eyebrow">Скоро</span><h1>PvP арена</h1><p>Переговорные поединки с другими игроками появятся позже.</p><Link className="button primary" to="/">На главный экран <span>→</span></Link></div></section>;
 }
 
 export default function App() {
@@ -200,14 +194,16 @@ export default function App() {
     <Route path="/training" element={<Training />} />
     <Route path="/training/custom" element={<CustomTrainingForm />} />
     <Route path="/training/mission/:id" element={<MissionSetup mode="method_training" />} />
+    <Route path="/training/guided/:id" element={<GuidedTrainingPage />} />
     <Route path="/training/session/:id" element={<GameDialog />} />
     <Route path="/session/:id" element={<GameDialog />} />
     <Route path="/story" element={<Story />} />
     <Route path="/story/:id" element={<StoryDetailPage />} />
     <Route path="/story/mission/:id" element={<MissionSetup mode="story" />} />
     <Route path="/pvp" element={<PvpSoon />} />
-    <Route path="/knowledge" element={<Knowledge />} />
-    <Route path="/knowledge/:id" element={<KnowledgeDetailPage />} />
+    <Route path="/knowledge" element={<KnowledgeLibrary />} />
+    <Route path="/knowledge/:id" element={<KnowledgePage />} />
+    <Route path="/knowledge/:id/quiz" element={<KnowledgeQuizPage />} />
     <Route path="/admin" element={<AdminPage />} />
     <Route path="/account" element={<AccountPage />} />
     <Route path="*" element={<section className="section-wrap not-found"><span className="eyebrow">404 / Не найдено</span><h1>Похоже, здесь пока пусто.</h1><Link className="button primary" to="/">На главную <span>↗</span></Link></section>} />

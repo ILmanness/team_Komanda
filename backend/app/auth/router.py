@@ -22,9 +22,9 @@ router = APIRouter(
 )
 
 
-def get_user_by_login(identifier: str):
-    with engine.connect() as connection:
-        result = connection.execute(
+async def get_user_by_login(identifier: str):
+    async with engine.connect() as connection:
+        result = (await connection.execute(
             text(
                 """
                 SELECT
@@ -42,7 +42,7 @@ def get_user_by_login(identifier: str):
                 """
             ),
             {"identifier": identifier},
-        ).mappings().first()
+        )).mappings().first()
 
     return dict(result) if result else None
 
@@ -52,11 +52,11 @@ def get_user_by_login(identifier: str):
     response_model=AuthResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def register(data: RegisterRequest):
+async def register(data: RegisterRequest):
     email = str(data.email).lower()
     login_name = data.login.lower()
 
-    existing_user = get_user_by_login(email) or get_user_by_login(login_name)
+    existing_user = await get_user_by_login(email) or await get_user_by_login(login_name)
 
     if existing_user:
         raise HTTPException(
@@ -67,8 +67,8 @@ def register(data: RegisterRequest):
     hashed_password = hash_password(data.password)
 
     try:
-        with engine.begin() as connection:
-            result = connection.execute(
+        async with engine.begin() as connection:
+            result = await connection.execute(
                 text(
                     """
                     INSERT INTO users (
@@ -123,10 +123,10 @@ def register(data: RegisterRequest):
     "/login",
     response_model=AuthResponse,
 )
-def login(data: LoginRequest):
+async def login(data: LoginRequest):
     identifier = str(data.login or data.email).lower()
 
-    user = get_user_by_login(identifier)
+    user = await get_user_by_login(identifier)
 
     if user is None or not user["password_hash"]:
         raise HTTPException(

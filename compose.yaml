@@ -37,13 +37,21 @@ services:
         condition: service_healthy
     restart: "no"
 
+  content-import:
+    <<: *backend
+    command: [python, -m, app.admin.import_editorial, --apply]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
   backend:
     <<: *backend
     command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, "8000", --reload]
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     depends_on:
-      migrate:
+      content-import:
         condition: service_completed_successfully
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3)"]
