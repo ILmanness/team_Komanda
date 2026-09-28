@@ -43,12 +43,12 @@ class TransferEvaluation(BaseModel):
     criteria: list[CriterionResult]
 
 
-def _load(connection, session_id, user_id, lock=False):
-    row = connection.execute(text(f"""
+async def _load(connection, session_id, user_id, lock=False):
+    row = (await connection.execute(text(f"""
         SELECT id, status, state, config_snapshot, final_result
         FROM game_sessions WHERE id=:id AND user_id=:user_id
         {'FOR UPDATE' if lock else ''}
-    """), {'id': session_id, 'user_id': user_id}).mappings().first()
+    """), {'id': session_id, 'user_id': user_id})).mappings().first()
     if row is None:
         raise HTTPException(404, 'Session not found')
     data = dict(row)
@@ -86,16 +86,16 @@ def _view(session, guided):
 
 
 @router.get('/{session_id}/guided')
-def get_guided(session_id: UUID, current_user: CurrentUser):
-    with engine.connect() as connection:
-        session, guided = _load(connection, session_id, current_user['id'])
+async def get_guided(session_id: UUID, current_user: CurrentUser):
+    async with engine.connect() as connection:
+        session, guided = await _load(connection, session_id, current_user['id'])
     return _view(session, guided)
 
 
 @router.post('/{session_id}/guided/choice')
-def choose(session_id: UUID, choice: GuidedChoice, current_user: CurrentUser):
-    with engine.begin() as connection:
-        session, guided = _load(connection, session_id, current_user['id'], lock=True)
+async def choose(session_id: UUID, choice: GuidedChoice, current_user: CurrentUser):
+    async with engine.begin() as connection:
+        session, guided = await _load(connection, session_id, current_user['id'], lock=True)
         state = session['state'] or {}
         events = state.get('events', [])
         previous = next((event for event in events if event.get('node_id') == choice.node_id), None)
@@ -128,7 +128,7 @@ def choose(session_id: UUID, choice: GuidedChoice, current_user: CurrentUser):
         }
         new_state = {**state, 'node_id': target, 'events': [*events, event],
                      'turn': len(events) + 1}
-        connection.execute(text("""
+        await connection.execute(text("""
             UPDATE game_sessions SET state=:state, last_activity_at=now(), lock_version=lock_version+1
             WHERE id=:id
         """), {'id': session_id, 'state': Jsonb(new_state)})
@@ -179,8 +179,8 @@ async def answer(session_id: UUID, payload: GuidedAnswer, current_user: CurrentU
     answer_text = payload.text.strip()
     if not answer_text:
         raise HTTPException(422, 'Answer cannot be empty')
-    with engine.begin() as connection:
-        session, guided = _load(connection, session_id, current_user['id'], lock=True)
+    async with engine.begin() as connection:
+        session, guided = await _load(connection, session_id, current_user['id'], lock=True)
         state = session['state'] or {}
         if (state.get('node_id') or guided['start_node_id']) != guided['transfer_node_id'] or payload.node_id != guided['transfer_node_id']:
             raise HTTPException(409, 'The final situation is not available yet')
@@ -190,7 +190,7 @@ async def answer(session_id: UUID, payload: GuidedAnswer, current_user: CurrentU
         if previous is None:
             state = {**state, 'transfer_answer': answer_text,
                      'transfer_timestamp': datetime.now(timezone.utc).isoformat()}
-            connection.execute(text("""
+            await connection.execute(text("""
                 UPDATE game_sessions SET state=:state, last_activity_at=now(), lock_version=lock_version+1
                 WHERE id=:id
             """), {'id': session_id, 'state': Jsonb(state)})
@@ -206,13 +206,13 @@ async def answer(session_id: UUID, payload: GuidedAnswer, current_user: CurrentU
     ) else 'failure'
     final_result = {'result': result, 'criteria': evaluation['criteria'] if evaluation else [],
                     'answer': answer_text, 'material_id': guided['material_id']}
-    with engine.begin() as connection:
-        session, guided = _load(connection, session_id, current_user['id'], lock=True)
+    async with engine.begin() as connection:
+        session, guided = await _load(connection, session_id, current_user['id'], lock=True)
         if session['state'].get('transfer_answer') != answer_text:
             raise HTTPException(409, 'Final answer changed')
         if session['status'] == 'completed':
             return _view(session, guided)
-        connection.execute(text("""
+        await connection.execute(text("""
             UPDATE game_sessions SET status=:status, final_result=:result, completed_at=now(),
                 last_activity_at=now(), lock_version=lock_version+1 WHERE id=:id
         """), {'id': session_id, 'status': 'needs_review' if result == 'needs_review' else 'completed',

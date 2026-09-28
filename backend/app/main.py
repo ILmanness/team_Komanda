@@ -31,12 +31,12 @@ def live():
 
 
 @app.get('/health/ready')
-def ready():
+async def ready():
     try:
-        with engine.connect() as connection:
-            connection.execute(text('SELECT 1 FROM alembic_version')).scalar_one()
-            connection.execute(text('SELECT id FROM game_sessions LIMIT 0'))
-            connection.execute(text('SELECT password_hash FROM users LIMIT 0'))
+        async with engine.connect() as connection:
+            (await connection.execute(text('SELECT 1 FROM alembic_version'))).scalar_one()
+            await connection.execute(text('SELECT id FROM game_sessions LIMIT 0'))
+            await connection.execute(text('SELECT password_hash FROM users LIMIT 0'))
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail='Database is not ready') from None
     return {'status': 'ok', 'database': 'ready', 'ai_provider': get_settings().ai_provider}

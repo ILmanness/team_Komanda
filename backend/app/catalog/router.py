@@ -30,29 +30,29 @@ class QuizSubmission(BaseModel):
     answers: dict[str, str] = Field(min_length=3, max_length=3)
 
 
-def _fetch_all(
+async def _fetch_all(
     sql: str,
     params: dict | None = None
 ):
-    with engine.connect() as connection:
+    async with engine.connect() as connection:
         return [
             dict(row)
-            for row in connection.execute(
+            for row in (await connection.execute(
                 text(sql),
                 params or {}
-            ).mappings().all()
+            )).mappings().all()
         ]
 
 
-def _fetch_one(
+async def _fetch_one(
     sql: str,
     params: dict
 ):
-    with engine.connect() as connection:
-        row = connection.execute(
+    async with engine.connect() as connection:
+        row = (await connection.execute(
             text(sql),
             params
-        ).mappings().first()
+        )).mappings().first()
 
         return dict(row) if row else None
 
@@ -61,9 +61,9 @@ def _fetch_one(
     "/storylines",
     response_model=list[StorylineListItem]
 )
-def list_storylines():
+async def list_storylines():
 
-    return _fetch_all("""
+    return await _fetch_all("""
         SELECT
             id,
             slug,
@@ -86,11 +86,11 @@ def list_storylines():
     "/storylines/{storyline_id}",
     response_model=StorylineDetail
 )
-def get_storyline(
+async def get_storyline(
     storyline_id: UUID
 ):
 
-    item = _fetch_one("""
+    item = await _fetch_one("""
         SELECT
             id,
             slug,
@@ -115,7 +115,7 @@ def get_storyline(
             detail="Storyline not found"
         )
 
-    item["missions"] = _fetch_all("""
+    item["missions"] = await _fetch_all("""
         SELECT
             id,
             storyline_id,
@@ -142,21 +142,21 @@ def get_storyline(
 
 
 @router.get('/storylines/{storyline_id}/progress')
-def storyline_progress(storyline_id: UUID, current_user: Annotated[dict, Depends(get_current_user)]):
-    with engine.connect() as connection:
-        exists = connection.execute(text('''
+async def storyline_progress(storyline_id: UUID, current_user: Annotated[dict, Depends(get_current_user)]):
+    async with engine.connect() as connection:
+        exists = await connection.execute(text('''
             SELECT 1 FROM storylines WHERE id=:id AND status='published'
         '''), {'id': storyline_id}).scalar_one_or_none()
         if exists is None:
             raise HTTPException(status_code=404, detail='Storyline not found')
-        return {'missions': get_story_progress(connection, storyline_id, current_user['id'])}
+        return {'missions': await get_story_progress(connection, storyline_id, current_user['id'])}
 
 
 @router.get(
     "/missions",
     response_model=list[MissionListItem]
 )
-def list_missions(
+async def list_missions(
 
     mission_type: str | None = Query(
         None,
@@ -169,7 +169,7 @@ def list_missions(
 
 ):
 
-    return _fetch_all("""
+    return await _fetch_all("""
         SELECT
             id,
             storyline_id,
@@ -218,17 +218,17 @@ def list_missions(
 
 
 @router.get('/game/options', response_model=GameOptions)
-def get_game_options():
+async def get_game_options():
     return GameOptions(
-        characters=_fetch_all('SELECT id, slug, name, role_title, description FROM characters ORDER BY name'),
-        paei_profiles=_fetch_all('SELECT id, code, leading_letter FROM paei_profiles ORDER BY code'),
-        difficulty_profiles=_fetch_all('SELECT id, code, title FROM difficulty_profiles ORDER BY title'),
+        characters=await _fetch_all('SELECT id, slug, name, role_title, description FROM characters ORDER BY name'),
+        paei_profiles=await _fetch_all('SELECT id, code, leading_letter FROM paei_profiles ORDER BY code'),
+        difficulty_profiles=await _fetch_all('SELECT id, code, title FROM difficulty_profiles ORDER BY title'),
     )
 
 
 @router.get('/missions/{mission_id}/briefing', response_model=MissionBriefing)
-def get_mission_briefing(mission_id: UUID):
-    mission = _fetch_one('''
+async def get_mission_briefing(mission_id: UUID):
+    mission = await _fetch_one('''
         SELECT m.id, m.storyline_id, m.mission_type, m.interaction_type,
                m.title, m.task, m.config, c.id AS character_id, c.slug AS character_slug, c.name AS character_name,
                c.role_title AS character_role_title, c.description AS character_description
@@ -257,23 +257,23 @@ def get_mission_briefing(mission_id: UUID):
     "/missions/{mission_id}",
     response_model=MissionBriefing
 )
-def get_mission(
+async def get_mission(
     mission_id: UUID
 ):
-    return get_mission_briefing(mission_id)
+    return await get_mission_briefing(mission_id)
 
 
 @router.get(
     "/knowledge",
     response_model=list[KnowledgeListItem]
 )
-def list_knowledge(
+async def list_knowledge(
 
     parent_id: UUID | None = None
 
 ):
 
-    return _fetch_all("""
+    return await _fetch_all("""
         SELECT
             id,
             parent_id,
@@ -303,23 +303,23 @@ def list_knowledge(
 
 
 @router.get('/knowledge/progress')
-def knowledge_progress(current_user: Annotated[dict, Depends(get_current_user)]):
-    with engine.connect() as connection:
-        completed = connection.execute(text("""
+async def knowledge_progress(current_user: Annotated[dict, Depends(get_current_user)]):
+    async with engine.connect() as connection:
+        completed = (await connection.execute(text("""
             SELECT knowledge_item_id FROM knowledge_progress WHERE user_id=:user_id
-        """), {'user_id': current_user['id']}).scalars().all()
-        attempts = connection.execute(text("""
+        """), {'user_id': current_user['id']})).scalars().all()
+        attempts = (await connection.execute(text("""
             SELECT DISTINCT ON (knowledge_item_id)
                    knowledge_item_id, score, question_count, created_at
             FROM knowledge_quiz_attempts WHERE user_id=:user_id
             ORDER BY knowledge_item_id, created_at DESC
-        """), {'user_id': current_user['id']}).mappings().all()
+        """), {'user_id': current_user['id']})).mappings().all()
     return {'completed_ids': completed, 'latest_quizzes': [dict(row) for row in attempts]}
 
 
 @router.get('/knowledge/{knowledge_id}/quiz')
-def get_knowledge_quiz(knowledge_id: UUID):
-    item = _fetch_one("""
+async def get_knowledge_quiz(knowledge_id: UUID):
+    item = await _fetch_one("""
         SELECT id, title, metadata FROM knowledge_items
         WHERE id=:id AND status='published'
     """, {'id': knowledge_id})
@@ -335,16 +335,16 @@ def get_knowledge_quiz(knowledge_id: UUID):
 
 
 @router.post('/knowledge/{knowledge_id}/complete')
-def complete_knowledge(knowledge_id: UUID,
+async def complete_knowledge(knowledge_id: UUID,
                        current_user: Annotated[dict, Depends(get_current_user)]):
-    item = _fetch_one("""
+    item = await _fetch_one("""
         SELECT id, metadata FROM knowledge_items
         WHERE id=:id AND status='published'
     """, {'id': knowledge_id})
     if item is None or (item['metadata'] or {}).get('kind') != 'material':
         raise HTTPException(status_code=404, detail='Knowledge material not found')
-    with engine.begin() as connection:
-        connection.execute(text("""
+    async with engine.begin() as connection:
+        await connection.execute(text("""
             INSERT INTO knowledge_progress(user_id, knowledge_item_id)
             VALUES (:user_id, :item_id) ON CONFLICT DO NOTHING
         """), {'user_id': current_user['id'], 'item_id': knowledge_id})
@@ -352,9 +352,9 @@ def complete_knowledge(knowledge_id: UUID,
 
 
 @router.post('/knowledge/{knowledge_id}/quiz')
-def submit_knowledge_quiz(knowledge_id: UUID, data: QuizSubmission,
+async def submit_knowledge_quiz(knowledge_id: UUID, data: QuizSubmission,
                           current_user: Annotated[dict, Depends(get_current_user)]):
-    item = _fetch_one("""
+    item = await _fetch_one("""
         SELECT id, metadata FROM knowledge_items
         WHERE id=:id AND status='published'
     """, {'id': knowledge_id})
@@ -378,15 +378,15 @@ def submit_knowledge_quiz(knowledge_id: UUID, data: QuizSubmission,
             'explanation': question['explanation'],
         })
     score = sum(result['is_correct'] for result in results)
-    with engine.begin() as connection:
-        connection.execute(text("""
+    async with engine.begin() as connection:
+        await connection.execute(text("""
             INSERT INTO knowledge_quiz_attempts
                 (user_id, knowledge_item_id, answers, score, question_count)
             VALUES (:user_id, :item_id, :answers, :score, :count)
         """), {'user_id': current_user['id'], 'item_id': knowledge_id,
               'answers': Jsonb(data.answers), 'score': score, 'count': len(results)})
         if score == len(results):
-            connection.execute(text("""
+            await connection.execute(text("""
                 INSERT INTO knowledge_progress(user_id, knowledge_item_id)
                 VALUES (:user_id, :item_id) ON CONFLICT DO NOTHING
             """), {'user_id': current_user['id'], 'item_id': knowledge_id})
@@ -398,13 +398,13 @@ def submit_knowledge_quiz(knowledge_id: UUID, data: QuizSubmission,
     "/knowledge/{knowledge_id}",
     response_model=KnowledgeDetail
 )
-def get_knowledge(
+async def get_knowledge(
 
     knowledge_id: UUID
 
 ):
 
-    item = _fetch_one("""
+    item = await _fetch_one("""
         SELECT
             id,
             parent_id,
@@ -438,7 +438,7 @@ def get_knowledge(
         item['metadata'] = {key: value for key, value in item['metadata'].items()
                             if key not in ('quiz', 'answer_key')}
 
-    item["children"] = _fetch_all("""
+    item["children"] = await _fetch_all("""
         SELECT
             id,
             parent_id,

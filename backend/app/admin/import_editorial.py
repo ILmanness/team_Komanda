@@ -11,9 +11,12 @@ from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
 from psycopg.types.json import Jsonb
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 
-from app.db import engine
+from app.config import get_settings
+
+# The editorial importer is a standalone CLI, so it uses a synchronous connection.
+engine = create_engine(get_settings().database_url, pool_pre_ping=True)
 
 CONTENT = Path(__file__).resolve().parents[2] / 'content'
 

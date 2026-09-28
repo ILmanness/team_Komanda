@@ -40,7 +40,7 @@ class GameService:
         on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
 
-        accepted = self._create_pending_user_message(
+        accepted = await self._create_pending_user_message(
             session_id=session_id,
             user_id=user_id,
             content=content,
@@ -73,13 +73,13 @@ class GameService:
             }
         ]
 
-        session = self._get_session(
+        session = await self._get_session(
             session_id=session_id,
             user_id=user_id,
         )
 
         if session is None:
-            self._mark_message_failed(
+            await self._mark_message_failed(
                 user_message_id,
                 "session_not_found",
             )
@@ -95,7 +95,7 @@ class GameService:
             return {"events": events}
 
         try:
-            recent_messages = self._get_recent_messages(
+            recent_messages = await self._get_recent_messages(
                 session_id=session_id,
                 limit=12,
             )
@@ -168,7 +168,7 @@ class GameService:
 
         except Exception:
             logger.exception('Evaluation failed for session %s', session_id)
-            self._mark_message_failed(
+            await self._mark_message_failed(
                 user_message_id,
                 "evaluation_failed",
             )
@@ -234,7 +234,7 @@ class GameService:
                 sequence_number=next_sequence + 1,
             )
 
-            assistant_message = self._commit_turn(
+            assistant_message = await self._commit_turn(
                 session_id=session_id,
                 user_id=user_id,
                 user_message_id=user_message_id,
@@ -283,7 +283,7 @@ class GameService:
 
         except Exception:
             logger.exception('Opponent reply failed for session %s', session_id)
-            self._mark_message_failed(
+            await self._mark_message_failed(
                 user_message_id,
                 "opponent_failed",
             )
@@ -298,7 +298,7 @@ class GameService:
 
             return {"events": events}
 
-    def _create_pending_user_message(
+    async def _create_pending_user_message(
         self,
         *,
         session_id: UUID,
@@ -307,8 +307,8 @@ class GameService:
         idempotency_key: UUID,
     ) -> dict[str, Any]:
 
-        with engine.begin() as connection:
-            session = connection.execute(
+        async with engine.begin() as connection:
+            session = (await connection.execute(
                 text(
                     """
                     SELECT
@@ -325,7 +325,7 @@ class GameService:
                     "session_id": session_id,
                     "user_id": user_id,
                 },
-            ).mappings().first()
+            )).mappings().first()
 
             if session is None:
                 return {
@@ -347,7 +347,7 @@ class GameService:
                     },
                 }
 
-            existing = connection.execute(
+            existing = (await connection.execute(
                 text(
                     """
                     SELECT
@@ -363,7 +363,7 @@ class GameService:
                     "session_id": session_id,
                     "idempotency_key": idempotency_key,
                 },
-            ).mappings().first()
+            )).mappings().first()
 
             if existing is not None:
                 return {
@@ -377,7 +377,7 @@ class GameService:
                     ],
                 }
 
-            pending = connection.execute(
+            pending = await connection.execute(
                 text(
                     """
                     SELECT id
@@ -405,7 +405,7 @@ class GameService:
                     },
                 }
 
-            max_sequence = connection.execute(
+            max_sequence = await connection.execute(
                 text(
                     """
                     SELECT COALESCE(
@@ -429,7 +429,7 @@ class GameService:
                 int(max_sequence or 0),
             ) + 1
 
-            message = connection.execute(
+            message = (await connection.execute(
                 text(
                     """
                     INSERT INTO session_messages (
@@ -457,7 +457,7 @@ class GameService:
                     "content": content,
                     "idempotency_key": idempotency_key,
                 },
-            ).mappings().one()
+            )).mappings().one()
 
         return {
             "kind": "created",
@@ -467,15 +467,15 @@ class GameService:
             ],
         }
 
-    def _get_session(
+    async def _get_session(
         self,
         *,
         session_id: UUID,
         user_id: UUID,
     ) -> dict[str, Any] | None:
 
-        with engine.connect() as connection:
-            row = connection.execute(
+        async with engine.connect() as connection:
+            row = (await connection.execute(
                 text(
                     """
                     SELECT
@@ -497,19 +497,19 @@ class GameService:
                     "session_id": session_id,
                     "user_id": user_id,
                 },
-            ).mappings().first()
+            )).mappings().first()
 
         return dict(row) if row else None
 
-    def _get_recent_messages(
+    async def _get_recent_messages(
         self,
         *,
         session_id: UUID,
         limit: int,
     ) -> list[dict[str, str]]:
 
-        with engine.connect() as connection:
-            rows = connection.execute(
+        async with engine.connect() as connection:
+            rows = (await connection.execute(
                 text(
                     """
                     SELECT
@@ -526,7 +526,7 @@ class GameService:
                     "session_id": session_id,
                     "limit": limit,
                 },
-            ).mappings().all()
+            )).mappings().all()
 
         return [
             {
@@ -548,7 +548,7 @@ class GameService:
             player_message=player_message,
         )
 
-    def _commit_turn(
+    async def _commit_turn(
         self,
         *,
         session_id: UUID,
@@ -564,22 +564,22 @@ class GameService:
         final_result: dict[str, Any] | None,
     ) -> dict[str, Any]:
         """Commit the complete turn once; a failed model call changes no game state."""
-        with engine.begin() as connection:
-            session = connection.execute(text('''
+        async with engine.begin() as connection:
+            session = (await connection.execute(text('''
                 SELECT status FROM game_sessions
                 WHERE id = :session_id AND user_id = :user_id FOR UPDATE
-            '''), {'session_id': session_id, 'user_id': user_id}).mappings().first()
+            '''), {'session_id': session_id, 'user_id': user_id})).mappings().first()
             if session is None or session['status'] != 'active':
                 raise ValueError('Session is no longer active')
-            pending = connection.execute(text('''
+            pending = (await connection.execute(text('''
                 SELECT id FROM session_messages
                 WHERE id = :message_id AND session_id = :session_id
                   AND processing_status = 'pending' FOR UPDATE
-            '''), {'message_id': user_message_id, 'session_id': session_id}).scalar_one_or_none()
+            '''), {'message_id': user_message_id, 'session_id': session_id})).scalar_one_or_none()
             if pending is None:
                 raise ValueError('Turn is no longer pending')
 
-            assistant = connection.execute(text('''
+            assistant = (await connection.execute(text('''
                 INSERT INTO session_messages (
                     session_id, sequence_number, role, content, payload,
                     processing_status, reply_to_message_id
@@ -591,14 +591,14 @@ class GameService:
                 'session_id': session_id, 'sequence_number': sequence_number,
                 'content': content, 'payload': Jsonb({'emotion': emotion}),
                 'message_id': user_message_id,
-            }).mappings().one()
-            connection.execute(text('''
+            })).mappings().one()
+            await connection.execute(text('''
                 UPDATE session_messages
                 SET evaluation = :evaluation, state_applied_at = now(),
                     processing_status = 'completed'
                 WHERE id = :message_id
             '''), {'message_id': user_message_id, 'evaluation': Jsonb(evaluation)})
-            connection.execute(text('''
+            await connection.execute(text('''
                 UPDATE game_sessions
                 SET state = :state, memory_summary = :memory_summary,
                     status = :status, final_result = :final_result,
@@ -616,7 +616,7 @@ class GameService:
                 'sequence_number': sequence_number,
             })
             if session_status == 'completed' and final_result and final_result.get('result') == 'success':
-                connection.execute(text('''
+                await connection.execute(text('''
                     INSERT INTO story_mission_progress (user_id, mission_id)
                     SELECT user_id, mission_id FROM game_sessions
                     WHERE id = :session_id AND mode = 'story' AND mission_id IS NOT NULL
@@ -705,14 +705,14 @@ class GameService:
             return 'warm'
         return 'neutral'
 
-    def _mark_message_failed(
+    async def _mark_message_failed(
         self,
         message_id: UUID,
         error_code: str,
     ) -> None:
 
-        with engine.begin() as connection:
-            connection.execute(
+        async with engine.begin() as connection:
+            await connection.execute(
                 text(
                     """
                     UPDATE session_messages
