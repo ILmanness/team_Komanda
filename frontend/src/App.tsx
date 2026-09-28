@@ -161,20 +161,31 @@ function StoryDetailPage() {
     return () => controller.abort();
   }, [id, user?.id]);
   return <><PageIntro eyebrow="Карта сюжета" title={resource.data?.title || 'Сюжетная линия'} text={resource.data?.description || 'Изучаем доступные миссии и порядок прохождения.'} back="/story" />
-    <section className="section-wrap content-section"><ResourceView resource={resource} empty="Сюжет не найден.">{(story: StorylineDetail) => <><div className="content-toolbar"><h2>Миссии</h2><span className="pill">Миссий: {story.missions.length}</span></div>
-      {story.missions.length ? <div className="mission-timeline">{story.missions.map((mission, index) => {
-        const firstInBranch = !story.missions.slice(0, index).some(previous => previous.branch_key === mission.branch_key);
-        const state = progress?.missions.find(item => item.mission_id === mission.id);
-        const unlocked = state?.unlocked ?? firstInBranch;
-        const content = <><span className="timeline-node">{index + 1}</span><div><span className="eyebrow">{mission.branch_key === 'main' ? 'Основная линия' : mission.branch_key || 'Этап'} · {state?.completed ? 'Пройдено' : unlocked ? 'Доступно' : 'Закрыто'}</span><h3>{mission.title}</h3><p>{state?.completed ? 'Можно пройти ещё раз' : unlocked ? 'Открыть сцену и начать разговор' : 'Пройдите предыдущую миссию этой ветки'}</p></div><span className="round-arrow">{unlocked ? '↗' : '—'}</span></>;
-        return unlocked ? <Link className="timeline-item" to={`/story/mission/${mission.id}`} key={mission.id}>{content}</Link>
-          : <div className="timeline-item locked" key={mission.id} aria-label={`${mission.title} — закрыто`}>{content}</div>;
-      })}</div> : <div className="notice">В этой линии пока нет опубликованных миссий.</div>}</>}</ResourceView></section></>;
+    <section className="section-wrap content-section"><ResourceView resource={resource} empty="Сюжет не найден.">{(story: StorylineDetail) => <StoryMap story={story} progress={progress} />}</ResourceView></section></>;
+}
+
+function StoryMap({ story, progress }: { story: StorylineDetail; progress: StoryProgress | null }) {
+  const branches = Array.from(story.missions.reduce((groups, mission) => {
+    const key = mission.branch_key || 'main';
+    groups.set(key, [...(groups.get(key) || []), mission]);
+    return groups;
+  }, new Map<string, Mission[]>()).entries());
+  const completed = progress?.missions.filter(mission => mission.completed).length || 0;
+  const branchTitle = (key: string) => ({ main: 'Основная линия', novice: 'Новичок', experienced: 'Опытный сотрудник', manager: 'Руководитель' }[key] || key.replace(/[_-]/g, ' '));
+  return <div className="story-map-layout"><div className="story-map-tracks"><div className="content-toolbar"><div><span className="eyebrow">Карта линии</span><h2>Выберите эпизод</h2></div><span className="pill">Миссий: {story.missions.length}</span></div>
+    {branches.length ? branches.map(([key, missions]) => <section className="story-branch" key={key} aria-label={branchTitle(key)}><h3>{branchTitle(key)}</h3><div className="story-branch-track">{missions.map((mission, index) => {
+      const state = progress?.missions.find(item => item.mission_id === mission.id);
+      const unlocked = state?.unlocked ?? index === 0;
+      const status = state?.completed ? 'Пройдено' : unlocked ? 'Доступно' : 'Закрыто';
+      const inner = <><span className="story-map-node">{String(index + 1).padStart(2, '0')}</span><strong>{mission.title}</strong><small>{status}</small></>;
+      return unlocked ? <Link className={`story-map-mission${state?.completed ? ' completed' : ''}`} title={mission.title} aria-label={`${mission.title} — ${status}`} to={`/story/mission/${mission.id}`} key={mission.id}>{inner}</Link>
+        : <div className="story-map-mission locked" title={mission.title} aria-label={`${mission.title} — ${status}`} key={mission.id}>{inner}</div>;
+    })}</div></section>) : <div className="notice">В этой линии пока нет опубликованных миссий.</div>}
+  </div><aside className="story-map-status"><span className="eyebrow">Статус линии</span><h2>{completed ? `${completed} из ${story.missions.length} пройдено` : 'Начните историю'}</h2><p>{completed ? 'Пройденные эпизоды можно открыть повторно. Новые становятся доступны после успешного разговора.' : 'Выберите доступный эпизод на карте. Следующие миссии открываются после успешного разговора.'}</p><div className="story-map-legend"><span><i className="available" /> Доступно</span><span><i className="done" /> Пройдено</span><span><i className="closed" /> Закрыто</span></div><Link className="button outline" to="/knowledge">База знаний <span>↗</span></Link></aside></div>;
 }
 
 function PvpSoon() {
-  return <><PageIntro eyebrow="Скоро" title="PvP арена" text="Здесь появятся переговорные поединки с другими игроками." back="/" />
-    <section className="section-wrap content-section"><div className="notice">Режим пока в разработке. Здесь появятся правила и возможность начать поединок.</div></section></>;
+  return <section className="pvp-page section-wrap"><div className="pvp-panel"><span className="eyebrow">Скоро</span><h1>PvP арена</h1><p>Переговорные поединки с другими игроками появятся позже.</p><Link className="button primary" to="/">На главный экран <span>→</span></Link></div></section>;
 }
 
 export default function App() {

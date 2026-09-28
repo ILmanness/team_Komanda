@@ -718,3 +718,54 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
   .knowledge-topic-page .knowledge-index-stamp { display: none; }
   .knowledge-topic-page .knowledge-heading p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 }
+
+.story-map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 285px; align-items: start; gap: 22px; }
+.story-map-tracks { min-width: 0; }
+.story-map-tracks .content-toolbar { margin-bottom: 27px; }
+.story-branch { margin-bottom: 27px; padding: 25px 27px 30px; background: #fffdf8; border: 2px solid #26383d; }
+.story-branch:nth-child(2n) { background: #e3efec; }
+.story-branch h3 { margin: 0 0 21px; font-size: 19px; letter-spacing: -.02em; }
+.story-branch-track { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding-bottom: 6px; }
+.story-map-mission { position: relative; flex: 1 0 120px; min-width: 120px; display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 0 8px; text-align: center; }
+.story-map-mission:not(:last-child)::after { content: ''; position: absolute; top: 27px; left: calc(50% + 28px); width: calc(100% - 56px); height: 2px; background: #47646a; }
+.story-map-mission strong { max-width: 170px; font-size: 14px; line-height: 1.25; overflow-wrap: anywhere; }
+.story-map-mission small { color: #a74735; font-size: 12px; font-weight: 800; }
+.story-map-node { position: relative; z-index: 1; width: 55px; height: 55px; display: grid; place-items: center; color: #fff9ed; background: #c9523d; border: 2px solid #26383d; border-radius: 50%; font-weight: 900; }
+.story-map-mission.completed .story-map-node { background: #337e64; }
+.story-map-mission.locked .story-map-node { color: #5b6968; background: #d9dfdb; }
+.story-map-mission.locked { color: #687471; }
+.story-map-mission.locked small { color: #667371; }
+.story-map-mission:not(.locked):hover .story-map-node { transform: translateY(-3px); box-shadow: 2px 4px 0 #26383d; }
+.story-map-status { position: sticky; top: 20px; padding: 26px; background: #f4d8a8; border: 2px solid #26383d; }
+.story-map-status h2 { margin: 11px 0; font-size: 27px; line-height: 1.15; letter-spacing: -.03em; }
+.story-map-status p { margin: 0 0 24px; color: #415456; font-size: 14px; line-height: 1.55; }
+.story-map-legend { display: grid; gap: 10px; margin-bottom: 25px; padding-top: 18px; border-top: 1px solid #607172; font-size: 13px; font-weight: 800; }
+.story-map-legend span { display: flex; align-items: center; gap: 9px; }
+.story-map-legend i { width: 15px; height: 15px; border: 1px solid #26383d; border-radius: 50%; }
+.story-map-legend .available { background: #c9523d; }
+.story-map-legend .done { background: #337e64; }
+.story-map-legend .closed { background: #d9dfdb; }
+.story-map-status .button { width: 100%; }
+@media (max-width: 900px) {
+  .story-map-layout { grid-template-columns: 1fr; }
+  .story-map-status { position: static; }
+}
+@media (max-width: 550px) {
+  .story-branch { padding: 19px; }
+  .story-branch-track { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 21px 10px; overflow: visible; }
+  .story-map-mission { min-width: 0; padding: 0 3px; }
+  .story-map-mission::after { display: none; }
+  .story-map-node { width: 49px; height: 49px; }
+  .story-map-mission strong { font-size: 13px; }
+}
+
+.pvp-page { min-height: min(720px, calc(100dvh - 150px)); display: grid; place-items: center; padding-top: 60px; padding-bottom: 75px; }
+.pvp-panel { width: min(100%, 700px); padding: clamp(35px, 6vw, 82px); text-align: center; background: #f3d9aa; border: 2px solid #26383d; box-shadow: 8px 8px 0 #28515d; }
+.pvp-panel h1 { margin: 12px 0 13px; font-size: clamp(41px, 5vw, 72px); letter-spacing: -.055em; }
+.pvp-panel p { max-width: 480px; margin: 0 auto 31px; color: #45585a; font-size: 17px; line-height: 1.55; }
+.pvp-panel .button { margin: auto; }
+@media (max-width: 550px) {
+  .pvp-page { min-height: calc(100dvh - 190px); padding-top: 35px; padding-bottom: 50px; }
+  .pvp-panel { padding: 32px 23px; box-shadow: 5px 5px 0 #28515d; }
+  .pvp-panel .button { width: 100%; }
+}
