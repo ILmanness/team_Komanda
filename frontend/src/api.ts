@@ -99,7 +99,7 @@ export type AccountStats = {
 
 export type GameMessage = { id: string; sequence_number: number; role: 'user' | 'assistant' | 'system'; content: string; emotion?: 'neutral' | 'warm' | 'tense' | 'angry'; processing_status: string };
 
-export type CharacterOption = { id: string; name: string; role_title: string; description: string };
+export type CharacterOption = { id: string; slug: string; name: string; role_title: string; description: string };
 export type GameOptions = {
   characters: CharacterOption[];
   paei_profiles: { id: string; code: string; leading_letter: string }[];

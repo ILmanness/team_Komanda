@@ -497,18 +497,12 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 .dialog-main { overflow: hidden; }
 .novel-stage { position: relative; min-height: 550px; overflow: hidden; color: #fffaf1; background: #1b3540; isolation: isolate; }
 .novel-scenery { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(14, 31, 39, .08), rgba(12, 27, 36, .28) 64%, rgba(12, 27, 36, .72)), url('/images/novel-office.png') center / cover; }
-.novel-player, .novel-opponent { position: absolute; bottom: 137px; z-index: 1; transition: opacity .2s, transform .2s; }
-.novel-player { left: 5%; height: 75%; width: 33%; min-width: 220px; display: flex; align-items: flex-end; justify-content: center; }
-.novel-player img { width: 100%; height: 100%; object-fit: contain; object-position: bottom; filter: drop-shadow(0 15px 15px rgba(0, 0, 0, .45)); }
-.novel-opponent { right: 8%; width: 30%; height: 68%; display: flex; align-items: flex-end; justify-content: center; }
-.novel-silhouette { position: absolute; bottom: 0; width: min(100%, 290px); height: 100%; filter: drop-shadow(0 16px 18px rgba(0, 0, 0, .45)); }
-.novel-silhouette-head { position: absolute; top: 9%; left: 34%; width: 33%; height: 32%; border-radius: 48% 48% 44% 44%; background: linear-gradient(110deg, #d9b58e, #947363); box-shadow: inset -13px 10px 0 rgba(30, 48, 53, .36); }
-.novel-silhouette-head::before { content: ''; position: absolute; top: -6%; left: -8%; width: 112%; height: 38%; border-radius: 60% 65% 25% 25%; transform: rotate(-8deg); background: #26343a; }
-.novel-silhouette-body { position: absolute; bottom: 0; left: 8%; width: 85%; height: 60%; border-radius: 36% 36% 8% 8%; background: linear-gradient(110deg, #315865, #152e3a); box-shadow: inset 22px 0 0 rgba(174, 123, 79, .25); }
-.novel-stage[data-emotion='warm'] .novel-silhouette-body { background: linear-gradient(110deg, #456e69, #203f4d); }
-.novel-stage[data-emotion='tense'] .novel-silhouette-body { background: linear-gradient(110deg, #705347, #26343b); }
-.novel-stage[data-emotion='angry'] .novel-silhouette-body { background: linear-gradient(110deg, #8e4b3d, #28333d); }
-.novel-stage[data-speaking='player'] .novel-opponent, .novel-stage[data-speaking='opponent'] .novel-player { opacity: .68; transform: scale(.97); }
+.novel-player, .novel-opponent { position: absolute; bottom: 137px; z-index: 1; width: min(37%, 430px); height: 395px; overflow: hidden; filter: drop-shadow(0 14px 18px rgba(0, 0, 0, .38)); }
+.novel-player { left: 5%; }
+.novel-player img { position: absolute; top: 0; left: -45%; width: 190%; height: auto; max-width: none; }
+.novel-opponent { right: 5%; }
+.novel-sprite { position: absolute; inset: 0; background-repeat: no-repeat; background-size: 200% 200%; }
+.novel-stage[data-character='anna'] .novel-sprite, .novel-stage[data-character='igor'] .novel-sprite { transform: scaleX(-1); }
 .novel-character-caption { position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); padding: 4px 11px; white-space: nowrap; font-size: 12px; font-weight: 900; background: rgba(18, 38, 45, .8); border: 1px solid rgba(255,255,255,.6); }
 .novel-dialogue { position: absolute; left: 20px; right: 20px; bottom: 18px; z-index: 3; min-height: 158px; padding: 18px 23px; background: rgba(18, 37, 45, .94); border: 2px solid #f4dfb9; box-shadow: 7px 7px 0 rgba(0,0,0,.34); }
 .novel-dialogue-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -517,6 +511,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 .novel-emotion { padding: 3px 8px; color: #dfebe6; border: 1px solid #97b1ac; font-size: 11px; letter-spacing: .03em; }
 .novel-count { color: #b5c6c3; font-size: 11px; white-space: nowrap; }
 .novel-dialogue p { max-height: 100px; margin: 10px 0; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; font-size: 17px; }
+.novel-caret { color: #f6c38b; animation: novel-blink .7s steps(1) infinite; }
+@keyframes novel-blink { 50% { opacity: 0; } }
 .novel-pages { display: flex; justify-content: flex-end; gap: 14px; }
 .novel-pages button { padding: 3px; color: #f9d6a2; background: transparent; border: 0; font-size: 12px; font-weight: 800; }
 .novel-pages button:disabled { opacity: .35; cursor: default; }
@@ -534,8 +530,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
   .account-profile-body, .account-overview { padding: 20px; }
   .account-history { margin-top: 32px; }
   .novel-stage { min-height: 520px; }
-  .novel-player { left: -8%; bottom: 169px; width: 63%; min-width: 0; height: 60%; }
-  .novel-opponent { right: -6%; bottom: 169px; width: 60%; height: 55%; }
+  .novel-player, .novel-opponent { bottom: 169px; width: 53%; height: min(53vw, 310px); }
+  .novel-player { left: -7%; }
+  .novel-player img { left: -18%; width: 138%; }
+  .novel-opponent { right: -7%; }
   .novel-dialogue { left: 10px; right: 10px; bottom: 10px; min-height: 175px; padding: 13px 15px; }
   .novel-dialogue p { font-size: 15px; max-height: 112px; }
   .dialog-brief { display: block; }
@@ -678,10 +676,14 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 
 /* Guided training is a scene with a separate decision tray, as in the prototype. */
 .guided-page { max-width: min(var(--content-width), 1320px); padding-top: 27px; }
+.guided-page > .novel-stage { border: 2px solid #26383d; }
 .guided-page > .back-link { margin-bottom: 13px; }
 .guided-heading { margin: 8px 0 20px; }
 .guided-heading h1 { font-size: clamp(32px, 3vw, 46px); }
 .guided-layout { display: block; border: 0; background: transparent; }
+.guided-continue { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.guided-continue p { margin: 0; line-height: 1.45; }
+.guided-actions > .guided-hint-button { display: block; margin: 0 0 18px; text-align: left; }
 .guided-scene { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); min-height: 340px; padding: 0; color: #fff9ef; background: #28515d; border: 2px solid #26383d; }
 .guided-scene-copy { min-width: 0; padding: clamp(24px, 3vw, 42px); }
 .guided-scene-top { border-color: #8eaaa9; }
@@ -713,6 +715,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
   .guided-scene-copy > p { font-size: 19px; }
   .guided-scene-art { height: 180px; min-height: 180px; }
   .guided-actions { padding: 20px; }
+  .guided-continue { align-items: stretch; flex-direction: column; }
 }
 @media (max-width: 700px) {
   .knowledge-topic-page .knowledge-index-stamp { display: none; }

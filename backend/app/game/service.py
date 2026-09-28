@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 from psycopg.types.json import Jsonb
@@ -34,6 +34,7 @@ class GameService:
         idempotency_key: UUID,
         evaluation_override: dict[str, Any] | None = None,
         response_override: str | None = None,
+        on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
 
         accepted = self._create_pending_user_message(
@@ -204,11 +205,20 @@ class GameService:
                 final=final_result is not None,
             )
 
-            opponent_response = (
-                response_override
-                if response_override is not None
-                else await self.provider.generate(opponent_messages)
-            )
+            if response_override is not None:
+                opponent_response = response_override
+                if on_event is not None:
+                    await on_event({'type': 'opponent.delta', 'content': response_override})
+            elif on_event is not None:
+                chunks: list[str] = []
+                async for chunk in self.provider.stream(opponent_messages):
+                    chunks.append(chunk)
+                    await on_event({'type': 'opponent.delta', 'content': chunk})
+                opponent_response = ''.join(chunks)
+            else:
+                opponent_response = await self.provider.generate(opponent_messages)
+            if not opponent_response.strip():
+                raise ValueError('Opponent response is empty')
             emotion = self._opponent_emotion(evaluation, updated_session['state'])
 
             assistant_message = self._save_opponent_response(

@@ -220,7 +220,7 @@ def list_missions(
 @router.get('/game/options', response_model=GameOptions)
 def get_game_options():
     return GameOptions(
-        characters=_fetch_all('SELECT id, name, role_title, description FROM characters ORDER BY name'),
+        characters=_fetch_all('SELECT id, slug, name, role_title, description FROM characters ORDER BY name'),
         paei_profiles=_fetch_all('SELECT id, code, leading_letter FROM paei_profiles ORDER BY code'),
         difficulty_profiles=_fetch_all('SELECT id, code, title FROM difficulty_profiles ORDER BY title'),
     )
@@ -230,7 +230,7 @@ def get_game_options():
 def get_mission_briefing(mission_id: UUID):
     mission = _fetch_one('''
         SELECT m.id, m.storyline_id, m.mission_type, m.interaction_type,
-               m.title, m.task, m.config, c.id AS character_id, c.name AS character_name,
+               m.title, m.task, m.config, c.id AS character_id, c.slug AS character_slug, c.name AS character_name,
                c.role_title AS character_role_title, c.description AS character_description
         FROM missions AS m
         LEFT JOIN characters AS c ON c.id = m.character_id
@@ -241,7 +241,7 @@ def get_mission_briefing(mission_id: UUID):
     character = None
     if mission['character_id'] is not None:
         character = {
-            'id': mission['character_id'], 'name': mission['character_name'],
+            'id': mission['character_id'], 'slug': mission['character_slug'], 'name': mission['character_name'],
             'role_title': mission['character_role_title'],
             'description': mission['character_description'],
         }

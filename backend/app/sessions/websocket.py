@@ -220,6 +220,7 @@ async def session_websocket(
                         ),
                         evaluation_override=evaluation_override,
                         response_override=response_override,
+                        on_event=websocket.send_json,
                     )
                 )
 

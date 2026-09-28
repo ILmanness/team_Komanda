@@ -2,34 +2,13 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, GameMessage, GameOptions, GameSession, MissionBriefing, sessionSocketUrl } from './api';
 import { useAuth } from './auth-context';
+import { NovelLine, NovelStage } from './NovelStage';
 
 function errorText(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return 'Срок входа истёк. Войдите снова.';
   if (cause instanceof ApiError && cause.status === 404) return 'Этот разговор не найден.';
   if (cause instanceof ApiError && cause.status === 403) return 'Эта сцена пока закрыта. Сначала пройдите предыдущую миссию.';
   return cause instanceof ApiError ? cause.message : 'Не удалось связаться с сервером. Попробуйте ещё раз.';
-}
-
-const emotions: Record<string, string> = {
-  neutral: 'Спокойно', warm: 'Доброжелательно', tense: 'Напряжённо', angry: 'Раздражённо',
-};
-
-function NovelStage({ messages, name, playerName }: { messages: GameMessage[]; name: string; playerName: string }) {
-  const visible = messages.filter(item => item.role !== 'system' && item.processing_status === 'completed');
-  const [page, setPage] = useState(0);
-  useEffect(() => { setPage(Math.max(0, visible.length - 1)); }, [visible.length]);
-  const current = visible[page];
-  const speaking = current?.role === 'user' ? 'player' : 'opponent';
-  const emotion = current?.role === 'assistant' ? current.emotion || 'neutral' : 'neutral';
-  return <section className="novel-stage" data-speaking={speaking} data-emotion={emotion} aria-label="Сцена разговора">
-    <div className="novel-scenery" aria-hidden="true" />
-    <div className="novel-opponent" aria-label={`Собеседник ${name}`}><div className="novel-silhouette"><span className="novel-silhouette-head" /><span className="novel-silhouette-body" /></div><span className="novel-character-caption">{name}</span></div>
-    <div className="novel-player" aria-label="Персонаж игрока"><img src="/images/player-faceless.png" alt="" /><span className="novel-character-caption">Вы</span></div>
-    <div className="novel-dialogue" aria-live="polite"><div className="novel-dialogue-head"><div><span className="novel-speaker">{current?.role === 'user' ? playerName : name}</span>{current?.role === 'assistant' && <span className="novel-emotion">{emotions[emotion] || emotions.neutral}</span>}</div><span className="novel-count">{visible.length ? `${page + 1} / ${visible.length}` : 'Начало сцены'}</span></div>
-      <p>{current?.content || 'Собеседник ждёт вашего первого ответа.'}</p>
-      {visible.length > 1 && <div className="novel-pages"><button type="button" onClick={() => setPage(value => Math.max(0, value - 1))} disabled={page === 0}>← Назад</button><button type="button" onClick={() => setPage(value => Math.min(visible.length - 1, value + 1))} disabled={page === visible.length - 1}>Далее →</button></div>}
-    </div>
-  </section>;
 }
 
 export function MissionSetup({ mode }: { mode: 'story' | 'method_training' }) {
@@ -108,6 +87,8 @@ export function GameDialog() {
   const [text, setText] = useState('');
   const [shownHints, setShownHints] = useState(0);
   const [error, setError] = useState('');
+  const [optimistic, setOptimistic] = useState('');
+  const [streamed, setStreamed] = useState('');
   const socketRef = useRef<WebSocket | null>(null);
   const pendingKey = useRef<{ text: string; key: string } | null>(null);
 
@@ -139,13 +120,15 @@ export function GameDialog() {
     setConnection('connecting');
     socket.onopen = () => setConnection('ready');
     socket.onmessage = async message => {
-      let event: { type?: string; code?: string; message?: string };
+      let event: { type?: string; code?: string; message?: string; content?: string; emotion?: string };
       try { event = JSON.parse(message.data); } catch { return; }
+      if (event.type === 'opponent.delta' && event.content) setStreamed(value => value + event.content);
       if (event.type === 'state.update' || event.type === 'message.duplicate' || event.type === 'error') {
         try {
           const [details, history] = await Promise.all([api.session(token, id), api.sessionMessages(token, id)]);
           setSession(details);
           setMessages(history.messages);
+          setOptimistic(''); setStreamed('');
           if (event.type !== 'error') { setText(''); pendingKey.current = null; }
         } catch (cause) { setError(errorText(cause)); }
         setPending(false);
@@ -165,6 +148,8 @@ export function GameDialog() {
     const key = pendingKey.current?.text === content ? pendingKey.current.key : crypto.randomUUID();
     pendingKey.current = { text: content, key };
     setPending(true);
+    setOptimistic(content);
+    setStreamed('');
     setError('');
     socket.send(JSON.stringify({ type: 'player.message', idempotency_key: key, content }));
   }
@@ -175,6 +160,8 @@ export function GameDialog() {
     const key = pendingKey.current?.text === choiceId ? pendingKey.current.key : crypto.randomUUID();
     pendingKey.current = { text: choiceId, key };
     setPending(true); setError('');
+    setOptimistic(briefing?.choices.find(item => item.id === choiceId)?.text || choiceId);
+    setStreamed('');
     socket.send(JSON.stringify({ type: 'player.choice', idempotency_key: key, choice_id: choiceId }));
   }
 
@@ -204,6 +191,12 @@ export function GameDialog() {
   const storyReturn = briefing?.storyline_id ? `/story/${briefing.storyline_id}` : '/story';
   const nextLink = session.mode === 'story' ? storyReturn : session.mode === 'method_training' ? '/training' : '/account';
   const nextLabel = session.mode === 'story' ? 'К карте сюжета' : session.mode === 'method_training' ? 'К тренировкам' : 'В кабинет';
+  const completed = messages.filter(item => item.role !== 'system' && item.processing_status === 'completed');
+  const lines: NovelLine[] = completed.map((item, index) => ({ key: `${index}-${item.role}`, role: item.role as 'user' | 'assistant', content: item.content, emotion: item.emotion }));
+  if (optimistic) lines.push({ key: `${lines.length}-user`, role: 'user', content: optimistic });
+  if (streamed) lines.push({ key: `${lines.length}-assistant`, role: 'assistant', content: streamed });
+  const slug = briefing?.character?.slug;
+  const character = session.mode === 'method_training' ? 'mentor' : slug === 'demo-igor' || /игор/i.test(name) ? 'igor' : 'anna';
   return <div className="section-wrap dialog-page">
     <Link className="back-link" to={back}>← Назад</Link>
     <div className="dialog-heading"><div><span className="eyebrow">{session.mode === 'story' ? 'Сюжет' : 'Тренировка'}</span><h1>{name}</h1><p>{briefing?.title || custom?.situation}</p></div><span className="pill">{session.state.turn || 0} реплик</span></div>
@@ -211,7 +204,7 @@ export function GameDialog() {
       {custom && <dl><dt>Ваша роль</dt><dd>{custom.player_role}</dd><dt>Собеседник</dt><dd>{custom.opponent_role}</dd></dl>}
       {(session.ai_mode !== 'mock' || choiceTraining) && <div className="game-state"><span>Контакт {session.state.contact ?? 0}</span><span>Напряжение {session.state.tension ?? 0}</span><span>Прогресс {session.state.progress ?? 0}</span></div>}
       {session.mode === 'custom' && <Link to="/training/custom" className="text-link">Новый свой диалог ↗</Link>}</aside>
-      <section className="dialog-main" aria-label="Диалог"><NovelStage messages={messages} name={name} playerName={user.display_name} />
+      <section className="dialog-main" aria-label="Диалог"><NovelStage lines={lines} name={session.mode === 'method_training' ? 'Старшая коллега' : name} playerName={user.display_name} character={character} waiting={pending && !streamed} />
         {session.ai_mode === 'mock' && !choiceTraining && <p className="dialog-demo-note">Демо-режим: ответы собеседника заготовлены. Игровая оценка здесь не отражает качество переговоров.</p>}
         {active && choiceTraining ? <div className="dialog-compose"><strong>Как вы ответите?</strong><div className="training-choices">{briefing.choices.map((choice, index) => <button type="button" key={choice.id} disabled={pending || connection !== 'ready'} onClick={() => choose(choice.id)}><span>{String.fromCharCode(65 + index)}</span>{choice.text}</button>)}</div>
           {briefing.hints.length > 0 && <div className="training-hints"><button className="text-link" type="button" onClick={() => setShownHints(value => Math.min(value + 1, briefing.hints.length))} disabled={shownHints >= briefing.hints.length}>Показать подсказку ({shownHints}/{briefing.hints.length}) ↗</button>{briefing.hints.slice(0, shownHints).map((hint, index) => <p key={index}>{hint}</p>)}</div>}
