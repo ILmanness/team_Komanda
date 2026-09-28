@@ -1,12 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom';
-import { api, ApiError, KnowledgeDetail, KnowledgeItem, Mission, Storyline, StorylineDetail, StoryProgress, User } from './api';
+import { api, ApiError, Mission, Storyline, StorylineDetail, StoryProgress, User } from './api';
 import { AuthContext, useAuth } from './auth-context';
 import { CustomTrainingForm } from './CustomTraining';
 import { GameDialog, MissionSetup } from './GameSession';
 import GuidedTrainingPage from './GuidedTraining';
 import { AdminPage } from './Admin';
 import { AccountPage } from './AccountPage';
+import { KnowledgeLibrary, KnowledgePage, KnowledgeQuizPage } from './KnowledgePages';
 import './styles.css';
 
 type Resource<T> = { data: T | null; loading: boolean; error: string | null };
@@ -171,25 +172,6 @@ function StoryDetailPage() {
       })}</div> : <div className="notice">В этой линии пока нет опубликованных миссий.</div>}</>}</ResourceView></section></>;
 }
 
-function Knowledge() {
-  const resource = useResource('knowledge', api.knowledge);
-  const items = resource.data || [];
-  const roots = items.filter(item => item.parent_id === null);
-  return <><PageIntro eyebrow="Теория" title="База знаний" text="Материалы, методы и идеи, которые помогут подготовиться к следующему разговору." />
-    <section className="section-wrap content-section"><div className="content-toolbar"><div><span className="eyebrow">Библиотека</span><h2>Темы и материалы</h2></div><span className="pill">{items.length} материалов</span></div>
-      <ResourceView resource={resource} empty="Материалы пока не опубликованы. Загляните сюда позже.">{() => <div className="knowledge-list">{(roots.length ? roots : items).map((item) => <Link to={`/knowledge/${item.id}`} className="knowledge-row" key={item.id}><div><span className="eyebrow">{item.item_type === 'topic' ? 'Тема' : item.item_type === 'method' ? 'Метод' : 'Статья'}</span><h3>{item.title}</h3><p>{item.summary || 'Откройте материал, чтобы узнать подробнее.'}</p></div><span className="round-arrow">↗</span></Link>)}</div>}</ResourceView>
-    </section></>;
-}
-
-function KnowledgeDetailPage() {
-  const { id = '' } = useParams();
-  const resource = useResource(`knowledge-${id}`, signal => api.knowledgeItem(id, signal));
-  return <><PageIntro eyebrow="База знаний" title={resource.data?.title || 'Материал'} text={resource.data?.summary || 'Исследуйте материал и связанные темы.'} back="/knowledge" />
-    <section className="section-wrap content-section"><ResourceView resource={resource} empty="Материал не найден.">{(item: KnowledgeDetail) => <div className="article-layout"><article className="article-card"><span className="eyebrow">{item.metadata.kind === 'test' ? 'Самопроверка' : item.item_type === 'topic' ? 'Тема' : item.item_type === 'method' ? 'Метод' : 'Статья'}</span><h2>{item.title}</h2>{item.body ? <div className="article-body">{item.body}</div> : <p className="muted">Текст материала пока не опубликован.</p>}{typeof item.metadata.answer_key === 'string' && <details className="article-answer-key"><summary>Посмотреть ответы и разбор</summary><div className="article-body">{item.metadata.answer_key}</div></details>}</article>
-      <aside className="article-side"><span className="eyebrow">Следующий шаг</span><h3>Продолжайте изучение</h3><p>Читайте связанные материалы или вернитесь к списку тем.</p><Link className="button outline" to="/knowledge">Все темы <span>→</span></Link></aside>
-      {item.children.length > 0 && <div className="related"><h2>В этой теме</h2>{item.children.map((child: KnowledgeItem) => <Link key={child.id} to={`/knowledge/${child.id}`} className="related-link">{child.title}<span>↗</span></Link>)}</div>}</div>}</ResourceView></section></>;
-}
-
 function PvpSoon() {
   return <><PageIntro eyebrow="Скоро" title="PvP арена" text="Здесь появятся переговорные поединки с другими игроками." back="/" />
     <section className="section-wrap content-section"><div className="notice">Режим пока в разработке. Здесь появятся правила и возможность начать поединок.</div></section></>;
@@ -208,8 +190,9 @@ export default function App() {
     <Route path="/story/:id" element={<StoryDetailPage />} />
     <Route path="/story/mission/:id" element={<MissionSetup mode="story" />} />
     <Route path="/pvp" element={<PvpSoon />} />
-    <Route path="/knowledge" element={<Knowledge />} />
-    <Route path="/knowledge/:id" element={<KnowledgeDetailPage />} />
+    <Route path="/knowledge" element={<KnowledgeLibrary />} />
+    <Route path="/knowledge/:id" element={<KnowledgePage />} />
+    <Route path="/knowledge/:id/quiz" element={<KnowledgeQuizPage />} />
     <Route path="/admin" element={<AdminPage />} />
     <Route path="/account" element={<AccountPage />} />
     <Route path="*" element={<section className="section-wrap not-found"><span className="eyebrow">404 / Не найдено</span><h1>Похоже, здесь пока пусто.</h1><Link className="button primary" to="/">На главную <span>↗</span></Link></section>} />

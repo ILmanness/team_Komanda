@@ -118,7 +118,8 @@ def apply(knowledge, trainings):
                 'slug': item['slug'], 'title': item['title'], 'summary': item['summary'],
                 'body': item['body'], 'metadata': Jsonb({'source': 'editorial-workbook',
                     'number': item['number'], 'kind': item['kind'],
-                    'answer_key': item.get('answer_key')}), 'sort_order': item['sort_order'],
+                    'answer_key': item.get('answer_key'), 'sections': item.get('sections', []),
+                    'quiz': item.get('quiz')}), 'sort_order': item['sort_order'],
             })
             counts[item['kind']] += 1
 

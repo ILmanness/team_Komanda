@@ -2,6 +2,8 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from psycopg.types.json import Jsonb
 from sqlalchemy import text
 
 from app.auth.dependencies import get_current_user
@@ -22,6 +24,10 @@ router = APIRouter(
     prefix="/api/v1",
     tags=["catalog"]
 )
+
+
+class QuizSubmission(BaseModel):
+    answers: dict[str, str] = Field(min_length=3, max_length=3)
 
 
 def _fetch_all(
@@ -296,6 +302,98 @@ def list_knowledge(
     })
 
 
+@router.get('/knowledge/progress')
+def knowledge_progress(current_user: Annotated[dict, Depends(get_current_user)]):
+    with engine.connect() as connection:
+        completed = connection.execute(text("""
+            SELECT knowledge_item_id FROM knowledge_progress WHERE user_id=:user_id
+        """), {'user_id': current_user['id']}).scalars().all()
+        attempts = connection.execute(text("""
+            SELECT DISTINCT ON (knowledge_item_id)
+                   knowledge_item_id, score, question_count, created_at
+            FROM knowledge_quiz_attempts WHERE user_id=:user_id
+            ORDER BY knowledge_item_id, created_at DESC
+        """), {'user_id': current_user['id']}).mappings().all()
+    return {'completed_ids': completed, 'latest_quizzes': [dict(row) for row in attempts]}
+
+
+@router.get('/knowledge/{knowledge_id}/quiz')
+def get_knowledge_quiz(knowledge_id: UUID):
+    item = _fetch_one("""
+        SELECT id, title, metadata FROM knowledge_items
+        WHERE id=:id AND status='published'
+    """, {'id': knowledge_id})
+    if item is None or (item['metadata'] or {}).get('kind') != 'test':
+        raise HTTPException(status_code=404, detail='Knowledge quiz not found')
+    quiz = item['metadata']['quiz']
+    selected = set(quiz['short_question_numbers'])
+    return {'id': item['id'], 'title': item['title'],
+            'questions': [
+                {key: question[key] for key in ('number', 'prompt', 'choices', 'material_id')}
+                for question in quiz['questions'] if question['number'] in selected
+            ]}
+
+
+@router.post('/knowledge/{knowledge_id}/complete')
+def complete_knowledge(knowledge_id: UUID,
+                       current_user: Annotated[dict, Depends(get_current_user)]):
+    item = _fetch_one("""
+        SELECT id, metadata FROM knowledge_items
+        WHERE id=:id AND status='published'
+    """, {'id': knowledge_id})
+    if item is None or (item['metadata'] or {}).get('kind') != 'material':
+        raise HTTPException(status_code=404, detail='Knowledge material not found')
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO knowledge_progress(user_id, knowledge_item_id)
+            VALUES (:user_id, :item_id) ON CONFLICT DO NOTHING
+        """), {'user_id': current_user['id'], 'item_id': knowledge_id})
+    return {'knowledge_item_id': knowledge_id, 'completed': True}
+
+
+@router.post('/knowledge/{knowledge_id}/quiz')
+def submit_knowledge_quiz(knowledge_id: UUID, data: QuizSubmission,
+                          current_user: Annotated[dict, Depends(get_current_user)]):
+    item = _fetch_one("""
+        SELECT id, metadata FROM knowledge_items
+        WHERE id=:id AND status='published'
+    """, {'id': knowledge_id})
+    if item is None or (item['metadata'] or {}).get('kind') != 'test':
+        raise HTTPException(status_code=404, detail='Knowledge quiz not found')
+    quiz = item['metadata']['quiz']
+    selected = set(quiz['short_question_numbers'])
+    if set(data.answers) != {str(number) for number in selected} or any(
+        answer not in ('A', 'B', 'C', 'D') for answer in data.answers.values()
+    ):
+        raise HTTPException(status_code=422, detail='Answer all short-check questions using A, B, C or D')
+    results = []
+    for question in quiz['questions']:
+        if question['number'] not in selected:
+            continue
+        choice = data.answers[str(question['number'])]
+        results.append({
+            'number': question['number'], 'material_id': question['material_id'],
+            'selected': choice, 'correct': question['correct'],
+            'is_correct': choice == question['correct'],
+            'explanation': question['explanation'],
+        })
+    score = sum(result['is_correct'] for result in results)
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO knowledge_quiz_attempts
+                (user_id, knowledge_item_id, answers, score, question_count)
+            VALUES (:user_id, :item_id, :answers, :score, :count)
+        """), {'user_id': current_user['id'], 'item_id': knowledge_id,
+              'answers': Jsonb(data.answers), 'score': score, 'count': len(results)})
+        if score == len(results):
+            connection.execute(text("""
+                INSERT INTO knowledge_progress(user_id, knowledge_item_id)
+                VALUES (:user_id, :item_id) ON CONFLICT DO NOTHING
+            """), {'user_id': current_user['id'], 'item_id': knowledge_id})
+    return {'score': score, 'total': len(results), 'results': results,
+            'completed': score == len(results)}
+
+
 @router.get(
     "/knowledge/{knowledge_id}",
     response_model=KnowledgeDetail
@@ -335,6 +433,10 @@ def get_knowledge(
             status_code=404,
             detail="Knowledge item not found"
         )
+
+    if (item['metadata'] or {}).get('kind') == 'test':
+        item['metadata'] = {key: value for key, value in item['metadata'].items()
+                            if key not in ('quiz', 'answer_key')}
 
     item["children"] = _fetch_all("""
         SELECT

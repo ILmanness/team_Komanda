@@ -48,6 +48,19 @@ export type KnowledgeDetail = KnowledgeItem & {
   children: KnowledgeItem[];
 };
 
+export type KnowledgeProgress = {
+  completed_ids: string[];
+  latest_quizzes: { knowledge_item_id: string; score: number; question_count: number; created_at: string }[];
+};
+export type KnowledgeQuiz = {
+  id: string; title: string;
+  questions: { number: number; prompt: string; material_id: string | null; choices: { id: string; text: string }[] }[];
+};
+export type KnowledgeQuizResult = {
+  score: number; total: number; completed: boolean;
+  results: { number: number; material_id: string | null; selected: string; correct: string; is_correct: boolean; explanation: string }[];
+};
+
 export type CustomSessionSettings = {
   situation: string;
   player_role: string;
@@ -186,6 +199,17 @@ export const api = {
     request<Mission[]>(`/v1/missions?mission_type=${type}`, { signal }),
   knowledge: (signal?: AbortSignal) => request<KnowledgeItem[]>('/v1/knowledge', { signal }),
   knowledgeItem: (id: string, signal?: AbortSignal) => request<KnowledgeDetail>(`/v1/knowledge/${encodeURIComponent(id)}`, { signal }),
+  knowledgeProgress: (token: string, signal?: AbortSignal) => request<KnowledgeProgress>('/v1/knowledge/progress', {
+    signal, headers: { Authorization: `Bearer ${token}` },
+  }),
+  knowledgeQuiz: (id: string, signal?: AbortSignal) => request<KnowledgeQuiz>(`/v1/knowledge/${encodeURIComponent(id)}/quiz`, { signal }),
+  completeKnowledge: (token: string, id: string) => request<{ completed: boolean }>(`/v1/knowledge/${encodeURIComponent(id)}/complete`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  }),
+  submitKnowledgeQuiz: (token: string, id: string, answers: Record<string, string>) =>
+    request<KnowledgeQuizResult>(`/v1/knowledge/${encodeURIComponent(id)}/quiz`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ answers }),
+    }),
   gameOptions: (signal?: AbortSignal) => request<GameOptions>('/v1/game/options', { signal }),
   missionBriefing: (id: string, signal?: AbortSignal) => request<MissionBriefing>(`/v1/missions/${encodeURIComponent(id)}/briefing`, { signal }),
   sessions: (token: string, signal?: AbortSignal) => request<GameSessionSummary[]>('/v1/sessions', {

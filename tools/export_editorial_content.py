@@ -34,6 +34,75 @@ def table(sheet):
     return [dict(zip(headers, row)) for row in values[1:] if any(value is not None for value in row)]
 
 
+def sections_from_rows(sheet):
+    sections = []
+    current = None
+    for row in range(5, sheet.max_row + 1):
+        cell = sheet.cell(row, 2)
+        value = clean(cell.value)
+        if not value or value == 'Ваш ответ:':
+            continue
+        if cell.font.bold:
+            current = {'title': str(value), 'paragraphs': []}
+            sections.append(current)
+        else:
+            if current is None:
+                current = {'title': 'Введение', 'paragraphs': []}
+                sections.append(current)
+            current['paragraphs'].append(str(value))
+    return [section for section in sections if section['paragraphs']]
+
+
+def quiz_from_sheet(sheet):
+    introduction = str(sheet.cell(6, 2).value or '')
+    short = re.search(r'короткой самопроверки ответьте на вопросы ([^.]+)', introduction)
+    if not short:
+        raise ValueError(f'{sheet.title}: short quiz selection is missing')
+    short_numbers = [int(value) for value in re.findall(r'\d+', short.group(1))]
+    questions = {}
+    current = None
+    answer_section = False
+    for row in range(5, sheet.max_row + 1):
+        value = clean(sheet.cell(row, 2).value)
+        if not value:
+            continue
+        if value == 'Ответы и объяснения':
+            answer_section = True
+            current = None
+            continue
+        if not answer_section:
+            match = re.fullmatch(r'Вопрос (\d+)\. Материал ([\d.]+)', str(value))
+            if match:
+                number = int(match.group(1))
+                current = {'number': number, 'material_id': match.group(2),
+                           'prompt': '', 'choices': [], 'correct': None, 'explanation': ''}
+                questions[number] = current
+            elif current and not current['prompt']:
+                current['prompt'] = str(value)
+            elif current and re.match(r'^[ABCD]\. ', str(value)):
+                current['choices'].append({'id': value[0], 'text': value[3:]})
+        else:
+            match = re.fullmatch(r'Вопрос (\d+)\. Ответ ([ABCD])\. Вернуться к материалу ([\d.]+)', str(value))
+            if match:
+                number = int(match.group(1))
+                if number not in questions or questions[number]['material_id'] != match.group(3):
+                    raise ValueError(f'{sheet.title}: answer key mismatch')
+                current = questions[number]
+                current['correct'] = match.group(2)
+            elif current and not current['explanation']:
+                current['explanation'] = str(value)
+                current = None
+    if len(short_numbers) != 3 or len(questions) not in (5, 6, 9):
+        raise ValueError(f'{sheet.title}: unexpected question count')
+    if any(len(question['choices']) != 4 or not question['correct'] or not question['explanation']
+           for question in questions.values()):
+        raise ValueError(f'{sheet.title}: incomplete question or answer')
+    if any(number not in questions for number in short_numbers):
+        raise ValueError(f'{sheet.title}: short quiz refers to missing question')
+    return {'short_question_numbers': short_numbers,
+            'questions': [questions[number] for number in sorted(questions)]}
+
+
 def knowledge(path):
     book = openpyxl.load_workbook(path, data_only=True)
     items = []
@@ -55,6 +124,8 @@ def knowledge(path):
             lines = lines[:answer_start]
         body = '\n\n'.join(str(line) for line in lines if line)
         title = clean(sheet.cell(2, 2).value)
+        sections = sections_from_rows(sheet) if kind != 'Тест по теме' else []
+        quiz = quiz_from_sheet(sheet) if kind == 'Тест по теме' else None
         items.append({
             'slug': ('topic-' if kind == 'Тема' else 'material-' if kind == 'Материал' else 'test-') + number.replace('.', '-'),
             'parent_slug': None if kind == 'Тема' else 'topic-' + number.split('.')[0],
@@ -65,6 +136,8 @@ def knowledge(path):
             'summary': next((line for line in lines if line), '')[:320],
             'body': body,
             'answer_key': answer_key,
+            'sections': sections,
+            'quiz': quiz,
             'sort_order': int(number.split('.')[0]) * 100 + (int(number.split('.')[1]) if '.' in number else 0) + (90 if kind == 'Тест по теме' else 0),
         })
     assert sum(item['kind'] == 'topic' for item in items) == 4

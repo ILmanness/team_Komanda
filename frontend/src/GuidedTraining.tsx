@@ -15,6 +15,7 @@ export default function GuidedTrainingPage() {
   const [answer, setAnswer] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [hintOpen, setHintOpen] = useState(false);
 
   useEffect(() => {
     const token = sessionStorage.getItem('arena_token');
@@ -69,6 +70,7 @@ export default function GuidedTrainingPage() {
   function continueAfterFeedback() {
     if (feedback) sessionStorage.setItem(`guided-seen-${id}`, String(feedback.sequence_no));
     setFeedback(null);
+    setHintOpen(false);
   }
 
   if (checking) return <div className="section-wrap content-section"><div className="notice">Открываем тренировку…</div></div>;
@@ -82,7 +84,7 @@ export default function GuidedTrainingPage() {
     <Link className="back-link" to="/training">← Все тренировки</Link>
     <header className="guided-heading"><div><span className="eyebrow">Тренировка · {training.title}</span>
       <h1>{finished ? 'Разбор тренировки' : training.node.type === 'free_text' ? 'Новая ситуация' : 'Рабочая ситуация'}</h1>
-      <p>{training.node.type === 'free_text' ? 'Ответьте своими словами. Пример появится после отправки.' : 'Выберите действие. После ответа увидите, как оно повлияло на разговор.'}</p>
+      <p>{finished ? 'Ваши решения и разбор последнего эпизода.' : training.node.type === 'free_text' ? 'Ответьте своими словами. Пример появится после отправки.' : 'Выберите действие. После ответа увидите, как оно повлияло на разговор.'}</p>
     </div><span className="guided-counter">{training.events.length} решений</span></header>
 
     {feedback && !finished && <section className="guided-feedback" aria-live="polite">
@@ -94,11 +96,14 @@ export default function GuidedTrainingPage() {
       <button className="button primary" onClick={continueAfterFeedback}>Продолжить →</button>
     </section>}
 
-    {!feedback && <div className="guided-layout"><article className="guided-scene">
-      <div className="guided-scene-top"><span>{training.node.speaker}</span><span>{training.node.type === 'retry' ? 'Ещё одна попытка' : training.node.type === 'free_text' ? 'Новый эпизод' : 'Эпизод'}</span></div>
+    {!feedback && <div className={`guided-layout${finished ? ' is-finished' : ''}`}><article className="guided-scene">
+      <div className="guided-scene-copy"><div className="guided-scene-top"><span>{training.node.speaker}</span><span>{training.node.type === 'retry' ? 'Ещё одна попытка' : training.node.type === 'free_text' ? 'Новый эпизод' : 'Эпизод'}</span></div>
       <p>{training.node.text}</p>
+      {!finished && training.node.goal && <button type="button" className="guided-hint-button" aria-expanded={hintOpen} onClick={() => setHintOpen(value => !value)}>{hintOpen ? 'Скрыть подсказку' : 'Подсказка'} →</button>}
+      {hintOpen && !finished && <aside className="guided-hint" aria-label="Подсказка"><span className="eyebrow">На что обратить внимание</span><p>{training.node.goal}</p></aside>}
       {finished && result && <div className="guided-outcome"><strong>{result.result === 'success' ? 'Все критерии выполнены' : result.result === 'needs_review' ? 'Ответ сохранён, нужна проверка' : 'Есть условия для доработки'}</strong>
         <p>Ваш ответ: {result.answer}</p></div>}
+      </div><div className="guided-scene-art"><img src="/images/office-training-scene.png" alt="Собеседница в переговорной" /></div>
     </article>
       <section className="guided-actions">
         {!finished && training.node.type !== 'free_text' && <>
