@@ -190,7 +190,25 @@ class CompatibleLLMProvider:
         try:
             return response_model.model_validate_json(content)
         except ValidationError as exc:
+            repaired = self._repair_json_wrapper(content)
+            if repaired is not None:
+                try:
+                    return response_model.model_validate_json(repaired)
+                except ValidationError:
+                    pass
             raise LLMResponseError('LLM response does not match the schema') from exc
+
+    @staticmethod
+    def _repair_json_wrapper(content: str) -> str | None:
+        """One local repair: remove a surrounding Markdown JSON fence only."""
+        stripped = content.strip()
+        if not stripped.startswith('```') or not stripped.endswith('```'):
+            return None
+        lines = stripped.splitlines()
+        if len(lines) < 3 or lines[0].lower() not in ('```', '```json'):
+            return None
+        candidate = '\n'.join(lines[1:-1]).strip()
+        return candidate if candidate.startswith('{') and candidate.endswith('}') else None
 
     async def _request(
         self,
@@ -202,20 +220,31 @@ class CompatibleLLMProvider:
         if response_format is not None:
             payload['response_format'] = response_format
 
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.post(
-                    self.base_url + '/chat/completions',
-                    headers={'Authorization': f'Bearer {self.api_key}'},
-                    json=payload,
-                )
-                response.raise_for_status()
-        except httpx.TimeoutException as exc:
-            raise LLMTimeoutError('LLM provider timed out') from exc
-        except httpx.HTTPStatusError as exc:
-            raise self._status_error(exc.response.status_code) from exc
-        except httpx.RequestError as exc:
-            raise LLMTransportError('LLM provider could not be reached') from exc
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                    response = await client.post(
+                        self.base_url + '/chat/completions',
+                        headers={'Authorization': f'Bearer {self.api_key}'},
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                break
+            except httpx.TimeoutException as exc:
+                failure: LLMProviderError = LLMTimeoutError('LLM provider timed out')
+                cause = exc
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                failure = self._status_error(status)
+                if status not in (408, 429, 500, 502, 503, 504):
+                    raise failure from exc
+                cause = exc
+            except httpx.RequestError as exc:
+                failure = LLMTransportError('LLM provider could not be reached')
+                cause = exc
+            if attempt:
+                raise failure from cause
+            await asyncio.sleep(0.2)
 
         try:
             content = response.json()['choices'][0]['message']['content']

@@ -48,7 +48,9 @@ def test_mock_story_can_succeed_but_short_answers_do_not(monkeypatch):
         state = engine.apply_evaluation(state=state, evaluation=score)
     assert engine.check_end_conditions(state=state)['reason'] == 'success'
     assert engine.build_final_result(state=state, reason='success')['result'] == 'success'
-    assert asyncio.run(evaluator.evaluate(context={}, player_message='ок'))['effects']['progress'] == 2
+    weak = asyncio.run(evaluator.evaluate(context={}, player_message='ок'))
+    assert weak['proposed_event']['action_type'] == 'neutral'
+    assert engine.apply_evaluation(state={'progress': 0}, evaluation=weak)['progress'] == 0
 
 
 def test_compatible_ai(monkeypatch):

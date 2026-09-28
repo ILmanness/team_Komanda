@@ -88,6 +88,15 @@ class SessionMessagesResponse(BaseModel):
     messages: list[SessionMessageResponse]
 
 
+class SessionHintResponse(BaseModel):
+    level: int
+    hint_type: Literal['direction', 'context', 'communication', 'mistake', 'strategy']
+    text: str
+    explanation: str
+    hints_used: int
+    remaining: int
+
+
 class FinishSessionResponse(BaseModel):
     id: UUID
     status: str

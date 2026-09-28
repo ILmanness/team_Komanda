@@ -180,6 +180,45 @@ def test_malformed_provider_payload_is_typed(monkeypatch):
         asyncio.run(compatible_provider().generate(MESSAGES))
 
 
+def test_transient_http_error_retries_once(monkeypatch):
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503)
+        return httpx.Response(200, json={
+            'choices': [{'message': {'content': 'Готово'}}],
+        })
+
+    mock_http(monkeypatch, handler)
+    assert asyncio.run(compatible_provider().generate(MESSAGES)) == 'Готово'
+    assert calls == 2
+
+
+def test_auth_error_is_not_retried(monkeypatch):
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(401)
+
+    mock_http(monkeypatch, handler)
+    with pytest.raises(ai.LLMAuthenticationError):
+        asyncio.run(compatible_provider().generate(MESSAGES))
+    assert calls == 1
+
+
+def test_structured_response_repairs_only_json_fence(monkeypatch):
+    mock_http(monkeypatch, lambda request: httpx.Response(200, json={
+        'choices': [{'message': {'content': '```json\n{"action":"question","has_question":true}\n```'}}],
+    }))
+    result = asyncio.run(compatible_provider().generate_structured(MESSAGES, TurnLabel))
+    assert result.action == 'question'
+
+
 def test_existing_complete_call_switches_to_mock_without_use_case_change(monkeypatch):
     monkeypatch.setattr(ai, 'get_settings', lambda: Settings(_env_file=None, ai_provider='mock'))
     assert isinstance(ai.get_provider(), ai.MockLLMProvider)
@@ -188,16 +227,24 @@ def test_existing_complete_call_switches_to_mock_without_use_case_change(monkeyp
 
 def test_game_use_case_accepts_mock_provider_without_external_request():
     provider = ai.MockLLMProvider(
-        text_response=json.dumps({
+        structured_response={
+            'schema_version': 'ai10-v1',
             'intent': 'question',
-            'quality': 0.75,
-            'critical_error': False,
-            'reason': 'Уточнение интересов',
-            'effects': {'contact': 1, 'tension': 0, 'progress': 1},
-        }),
+            'observations': {
+                'conversation_progress': 'forward',
+                'features': [{'code': 'interest_question', 'evidence': 'Что для вас важно?'}],
+            },
+            'profile_fit': {'P': 0, 'A': 0, 'E': 0, 'I': 1},
+            'proposed_event': {'action_type': 'positive', 'critical_flags': []},
+            'explanation': {'reason': 'Уточнение интересов'},
+            'paei_markers': [
+                {'letter': 'I', 'fragment': 'для вас важно', 'confidence': 0.8},
+            ],
+            'hint_basis': ['interest_question'],
+        },
     )
     service = GameService(provider=provider)
     assert service.evaluator.provider is provider
     result = asyncio.run(service._evaluate(context={}, player_message='Что для вас важно?'))
     assert result['intent'] == 'question'
-    assert result['effects']['contact'] == 1
+    assert result['proposed_event']['action_type'] == 'positive'

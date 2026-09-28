@@ -103,8 +103,9 @@ def test_opponent_receives_bounded_context_and_current_message_once():
     )
 
     private_payload = json.loads(messages[1]['content'])
-    assert private_payload['game']['mission']['context']['hidden_context'] == 'Секрет для персонажа'
-    assert 'history' not in private_payload['game']
+    assert private_payload['permanent_profile']['mission']['context']['hidden_context'] == 'Секрет для персонажа'
+    assert 'history' not in private_payload['permanent_profile']
+    assert private_payload['current_turn']['state']['contact'] == 70
     assert messages[2:-1] == game_context['history']
     assert messages[-1] == {'role': 'user', 'content': 'новый вопрос'}
 

@@ -2,12 +2,13 @@
 import asyncio
 import os
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from psycopg.types.json import Jsonb
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
@@ -20,6 +21,7 @@ from app.auth.security import create_access_token
 from app.catalog import router as catalog_router
 from app.config import Settings, get_settings
 from app.game import service as game_service
+from app.game.evaluator import Evaluator
 from app.main import app
 from app.sessions import router as sessions_router
 from app.sessions import websocket as sessions_websocket
@@ -80,6 +82,61 @@ def create_session(connection, days=None, idle_days=0):
     return session_id
 
 
+def test_hint_endpoint_limits_one_per_turn_and_records_penalty(database, monkeypatch):
+    monkeypatch.setattr(sessions_router, 'engine', database)
+    monkeypatch.setattr(auth_dependencies, 'engine', database)
+    with database.begin() as connection:
+        session_id = create_session(connection)
+        user_id = connection.execute(text(
+            'SELECT user_id FROM game_sessions WHERE id = :id'
+        ), {'id': session_id}).scalar_one()
+        message = 'Давайте обсудим, как можем найти решение.'
+        evaluation = asyncio.run(Evaluator(MockLLMProvider(demo_evaluation=True)).evaluate(
+            context={}, player_message=message,
+        ))
+        connection.execute(text("""
+            UPDATE game_sessions
+            SET state = :state, config_snapshot = :snapshot
+            WHERE id = :id
+        """), {
+            'id': session_id,
+            'state': Jsonb({
+                'turn': 1, 'contact': 8, 'tension': 0, 'progress': 12,
+                'critical_errors': 0, 'negotiation_quality': 62,
+            }),
+            'snapshot': Jsonb({
+                'mission': {'task': 'Согласовать план'},
+                'difficulty': {'code': 'Normal'},
+            }),
+        })
+        connection.execute(text("""
+            UPDATE session_messages
+            SET content = :content, evaluation = :evaluation
+            WHERE session_id = :id AND role = 'user'
+        """), {
+            'id': session_id,
+            'content': message,
+            'evaluation': Jsonb(evaluation),
+        })
+
+    client = TestClient(app)
+    headers = {'Authorization': f'Bearer {create_access_token(user_id)}'}
+    url = f'/api/v1/sessions/{session_id}/hint'
+    first = client.post(url, headers=headers)
+    assert first.status_code == 200, first.text
+    assert first.json()['hints_used'] == 1
+    assert first.json()['remaining'] == 2
+    assert client.post(url, headers=headers).status_code == 409
+    with database.connect() as connection:
+        state = connection.execute(text(
+            'SELECT state FROM game_sessions WHERE id = :id'
+        ), {'id': session_id}).scalar_one()
+    assert state['negotiation_quality'] == 59
+    assert state['hint_history'] == [{
+        'turn': 1, 'hint_type': 'strategy', 'level': 1,
+    }]
+
+
 def test_retention_dry_run_and_apply(database):
     with database.begin() as connection:
         active = create_session(connection)
@@ -121,7 +178,10 @@ def test_game_custom_session_websocket_round_trip(database, monkeypatch):
     monkeypatch.setattr(sessions_router, 'engine', database)
     monkeypatch.setattr(sessions_websocket, 'engine', database)
     monkeypatch.setattr(game_service, 'engine', database)
-    monkeypatch.setattr(game_service, 'get_provider', lambda: MockLLMProvider(demo_evaluation=True))
+    monkeypatch.setattr(
+        sessions_websocket, 'game_service',
+        game_service.GameService(provider=MockLLMProvider(demo_evaluation=True)),
+    )
     with database.begin() as connection:
         user_id = connection.execute(text("INSERT INTO users(display_name) VALUES ('Player') RETURNING id")).scalar_one()
     token = create_access_token(user_id)
@@ -143,7 +203,7 @@ def test_game_custom_session_websocket_round_trip(database, monkeypatch):
         assert socket.receive_json()['type'] == 'message.accepted'
         opponent = socket.receive_json()
         assert opponent['type'] == 'opponent.message', opponent
-        assert opponent['emotion'] == 'warm'
+        assert opponent['emotion'] == 'warm', opponent
         state = socket.receive_json()
         assert state['type'] == 'state.update' and state['state']['progress'] == 12
     messages = client.get(f'/api/v1/sessions/{session_id}/messages', headers=headers)
@@ -155,6 +215,184 @@ def test_game_custom_session_websocket_round_trip(database, monkeypatch):
     finished = client.post(f'/api/v1/sessions/{session_id}/finish', headers=headers)
     assert finished.status_code == 200 and finished.json()['status'] == 'completed'
     assert finished.json()['final_result']['result'] == 'failure'
+
+
+def test_opponent_failure_does_not_apply_partial_turn(database, monkeypatch):
+    monkeypatch.setattr(auth_dependencies, 'engine', database)
+    monkeypatch.setattr(sessions_router, 'engine', database)
+    monkeypatch.setattr(game_service, 'engine', database)
+    with database.begin() as connection:
+        user_id = connection.execute(text(
+            "INSERT INTO users(display_name) VALUES ('Player') RETURNING id"
+        )).scalar_one()
+    client = TestClient(app)
+    headers = {'Authorization': f'Bearer {create_access_token(user_id)}'}
+    created = client.post('/api/v1/sessions', headers=headers, json={
+        'mode': 'custom', 'custom_context': {
+            'situation': 'Переговоры о сроке.', 'player_role': 'Менеджер',
+            'opponent_role': 'Заказчик', 'goal': 'Согласовать срок.',
+        },
+    })
+    assert created.status_code == 201, created.text
+    session_id = created.json()['id']
+    with database.connect() as connection:
+        before = connection.execute(text('''
+            SELECT state, memory_summary FROM game_sessions WHERE id = :id
+        '''), {'id': session_id}).one()
+
+    class FailingOpponent(MockLLMProvider):
+        async def generate(self, messages):
+            raise RuntimeError('model unavailable')
+
+    service = game_service.GameService(provider=FailingOpponent(demo_evaluation=True))
+    turn = asyncio.run(service.process_player_message(
+        session_id=UUID(session_id), user_id=user_id,
+        content='Давайте обсудим сроки.', idempotency_key=uuid4(),
+    ))
+    assert turn['events'][-1]['code'] == 'opponent_failed'
+    with database.connect() as connection:
+        after = connection.execute(text('''
+            SELECT state, memory_summary FROM game_sessions WHERE id = :id
+        '''), {'id': session_id}).one()
+        messages = connection.execute(text('''
+            SELECT role, processing_status, evaluation FROM session_messages
+            WHERE session_id = :id ORDER BY sequence_number
+        '''), {'id': session_id}).all()
+    assert after == before
+    assert messages == [('user', 'failed', None)]
+
+
+def test_memory_survives_service_reload(database, monkeypatch):
+    monkeypatch.setattr(auth_dependencies, 'engine', database)
+    monkeypatch.setattr(sessions_router, 'engine', database)
+    monkeypatch.setattr(game_service, 'engine', database)
+    with database.begin() as connection:
+        user_id = connection.execute(text(
+            "INSERT INTO users(display_name) VALUES ('Player') RETURNING id"
+        )).scalar_one()
+    client = TestClient(app)
+    headers = {'Authorization': f'Bearer {create_access_token(user_id)}'}
+    created = client.post('/api/v1/sessions', headers=headers, json={
+        'mode': 'custom', 'custom_context': {
+            'situation': 'Переговоры о сроке.', 'player_role': 'Менеджер',
+            'opponent_role': 'Заказчик', 'goal': 'Согласовать срок.',
+        },
+    })
+    assert created.status_code == 201, created.text
+    session_id = UUID(created.json()['id'])
+    message = 'Релиз в пятницу. Договорились проверить сборку утром?'
+    evaluation = {
+        'schema_version': 'ai10-v1', 'intent': 'agreement',
+        'observations': {'conversation_progress': 'forward', 'features': [
+            {'code': 'fact_statement', 'evidence': 'Релиз в пятницу.'},
+            {'code': 'agreement_fixation', 'evidence': 'Договорились проверить сборку утром?'},
+        ]},
+        'profile_fit': {'P': 1, 'A': 1, 'E': 0, 'I': 0},
+        'proposed_event': {'action_type': 'positive', 'critical_flags': []},
+        'explanation': {'reason': 'Конкретное предложение'},
+        'paei_markers': [], 'hint_basis': [],
+    }
+    service = game_service.GameService(provider=MockLLMProvider(demo_evaluation=True))
+    turn = asyncio.run(service.process_player_message(
+        session_id=session_id, user_id=user_id, content=message,
+        idempotency_key=uuid4(), evaluation_override=evaluation,
+        response_override='Согласен, проверим сборку утром.',
+    ))
+    assert turn['events'][1]['type'] == 'opponent.message'
+    reloaded = game_service.GameService(provider=MockLLMProvider(demo_evaluation=True))
+    saved = reloaded._get_session(session_id=session_id, user_id=user_id)
+    assert saved['memory_summary']['agreements'][0]['text'] == (
+        'Договорились проверить сборку утром?'
+    )
+    assert saved['state']['memory']['facts'][0]['text'] == 'Релиз в пятницу.'
+
+
+@pytest.mark.parametrize('message', ['бууббууб', 'ты балбес'])
+def test_non_negotiation_input_completes_turn_with_character_reply(database, monkeypatch, message):
+    monkeypatch.setattr(auth_dependencies, 'engine', database)
+    monkeypatch.setattr(sessions_router, 'engine', database)
+    monkeypatch.setattr(game_service, 'engine', database)
+    with database.begin() as connection:
+        user_id = connection.execute(text(
+            "INSERT INTO users(display_name) VALUES ('Player') RETURNING id"
+        )).scalar_one()
+    client = TestClient(app)
+    headers = {'Authorization': f'Bearer {create_access_token(user_id)}'}
+    created = client.post('/api/v1/sessions', headers=headers, json={
+        'mode': 'custom', 'custom_context': {
+            'situation': 'Согласование срока.', 'player_role': 'Заказчик',
+            'opponent_role': 'Руководитель проекта', 'opponent_name': 'Анна',
+            'goal': 'Договориться о сроке.',
+        },
+    })
+    assert created.status_code == 201, created.text
+
+    class NoCallProvider(MockLLMProvider):
+        async def generate(self, messages):
+            raise AssertionError('No model call expected for this input')
+
+        async def generate_structured(self, messages, response_model):
+            raise AssertionError('No model call expected for this input')
+
+    service = game_service.GameService(provider=NoCallProvider())
+    turn = asyncio.run(service.process_player_message(
+        session_id=UUID(created.json()['id']), user_id=user_id,
+        content=message, idempotency_key=uuid4(),
+    ))
+    assert [event['type'] for event in turn['events'][:3]] == [
+        'message.accepted', 'opponent.message', 'state.update',
+    ]
+    assert turn['events'][1]['content'].startswith(('Я ', 'Мне '))
+    assert 'запрос' not in turn['events'][1]['content'].casefold()
+    assert turn['events'][2]['state']['turn'] == 1
+
+
+def test_assistant_style_model_reply_is_replaced_before_saving(database, monkeypatch):
+    monkeypatch.setattr(auth_dependencies, 'engine', database)
+    monkeypatch.setattr(sessions_router, 'engine', database)
+    monkeypatch.setattr(game_service, 'engine', database)
+    with database.begin() as connection:
+        user_id = connection.execute(text(
+            "INSERT INTO users(display_name) VALUES ('Player') RETURNING id"
+        )).scalar_one()
+    client = TestClient(app)
+    headers = {'Authorization': f'Bearer {create_access_token(user_id)}'}
+    created = client.post('/api/v1/sessions', headers=headers, json={
+        'mode': 'custom', 'custom_context': {
+            'situation': 'Согласование срока.', 'player_role': 'Заказчик',
+            'opponent_role': 'Руководитель проекта', 'opponent_name': 'Анна',
+            'goal': 'Договориться о сроке.',
+        },
+    })
+    assert created.status_code == 201, created.text
+    session_id = UUID(created.json()['id'])
+    service = game_service.GameService(provider=MockLLMProvider(
+        text_response='Не понял вас, повторите запрос? Нужны конкретные ответы.',
+    ))
+    evaluation = {
+        'schema_version': 'ai10-v1', 'intent': 'question',
+        'observations': {'conversation_progress': 'forward', 'features': [
+            {'code': 'clarification', 'evidence': 'Какие условия вам подходят?'},
+        ]},
+        'profile_fit': {'P': 0, 'A': 0, 'E': 0, 'I': 0},
+        'proposed_event': {'action_type': 'positive', 'critical_flags': []},
+        'explanation': {'reason': 'Уточнение условий'},
+        'paei_markers': [], 'hint_basis': [],
+    }
+    turn = asyncio.run(service.process_player_message(
+        session_id=session_id, user_id=user_id,
+        content='Какие условия вам подходят?', idempotency_key=uuid4(),
+        evaluation_override=evaluation,
+    ))
+    reply = turn['events'][1]['content']
+    assert reply.startswith('Мне ')
+    assert 'запрос' not in reply.casefold()
+    with database.connect() as connection:
+        stored = connection.execute(text('''
+            SELECT content FROM session_messages
+            WHERE session_id=:sid AND role='assistant'
+        '''), {'sid': session_id}).scalar_one()
+    assert stored == reply
 
 
 def test_story_unlock_requires_success_and_manual_finish_does_not_unlock(database, monkeypatch):

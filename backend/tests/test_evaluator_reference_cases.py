@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from app.game.evaluator_contract import EvaluatorOutput
+from app.game.evaluator_contract import EvaluatorOutput, TurnEvaluation
 
 REFERENCE_PATH = Path(__file__).resolve().parents[2] / 'content' / 'evaluator_reference_cases.json'
 REFERENCE = json.loads(REFERENCE_PATH.read_text(encoding='utf-8'))
@@ -24,7 +24,8 @@ DELTA_FIELDS = ('contact', 'resistance', 'progress', 'quality', 'critical_errors
 def matches_reference(case: dict, evaluation: dict) -> bool:
     """Compare an AI-04-style result to required and admissible draft labels."""
     try:
-        result = EvaluatorOutput.model_validate(evaluation)
+        model = TurnEvaluation if evaluation.get('schema_version') == 'ai10-v1' else EvaluatorOutput
+        result = model.model_validate(evaluation)
         result.validate_evidence(case['input']['player_message'])
     except ValueError:
         return False
