@@ -26,10 +26,10 @@ async def main() -> None:
     login = args.login.lower()
     email = args.email.lower()
     async with engine.begin() as connection:
-        existing = await connection.execute(text('''
+        existing = (await connection.execute(text('''
             SELECT id, login, email FROM users
             WHERE lower(login)=:login OR lower(email)=:email FOR UPDATE
-        '''), {'login': login, 'email': email}).mappings().all()
+        '''), {'login': login, 'email': email})).mappings().all()
         if len(existing) > 1 or (existing and (existing[0]['login'] != login or existing[0]['email'] != email)):
             raise SystemExit('The login or email belongs to another account')
         if existing:

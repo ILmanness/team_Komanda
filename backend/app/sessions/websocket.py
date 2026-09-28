@@ -54,7 +54,7 @@ async def get_session(
 
     async with engine.connect() as connection:
 
-        row = await connection.execute(
+        row = (await connection.execute(
             text(
                 """
                 SELECT
@@ -75,7 +75,7 @@ async def get_session(
                 "session_id": session_id,
                 "user_id": user_id,
             },
-        ).mappings().first()
+        )).mappings().first()
 
     return dict(row) if row else None
 

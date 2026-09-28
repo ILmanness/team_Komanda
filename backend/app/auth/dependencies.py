@@ -31,7 +31,7 @@ async def get_current_user(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
 ):
     async with engine.connect() as connection:
-        result = await connection.execute(
+        result = (await connection.execute(
             text(
                 """
                 SELECT
@@ -47,7 +47,7 @@ async def get_current_user(
                 """
             ),
             {"user_id": user_id},
-        ).mappings().first()
+        )).mappings().first()
 
     if result is None:
         raise HTTPException(

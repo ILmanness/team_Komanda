@@ -22,12 +22,12 @@ async def cleanup(apply: bool = False) -> dict[str, int]:
             if not (await connection.execute(text('SELECT pg_try_advisory_xact_lock(18092026)'))).scalar():
                 await transaction.rollback()
                 return counts
-            idle = await connection.execute(text('''
+            idle = (await connection.execute(text('''
                 SELECT id FROM game_sessions
                 WHERE status = 'active'
                   AND last_activity_at < now() - make_interval(days => :days)
                 ORDER BY last_activity_at LIMIT :batch FOR UPDATE SKIP LOCKED
-            '''), {'days': settings.active_session_idle_days, 'batch': BATCH_SIZE}).scalars().all()
+            '''), {'days': settings.active_session_idle_days, 'batch': BATCH_SIZE})).scalars().all()
             for session_id in idle:
                 await connection.execute(text('''
                     UPDATE game_sessions SET status = 'abandoned', completed_at = now(),
@@ -35,20 +35,20 @@ async def cleanup(apply: bool = False) -> dict[str, int]:
                 '''), {'id': session_id})
             counts['abandoned'] = len(idle)
 
-            expired = await connection.execute(text('''
+            expired = (await connection.execute(text('''
                 SELECT id FROM game_sessions WHERE status <> 'active'
                   AND completed_at <= now() - make_interval(days => :days)
                 ORDER BY completed_at LIMIT :batch FOR UPDATE SKIP LOCKED
-            '''), {'days': settings.session_retention_days, 'batch': BATCH_SIZE}).scalars().all()
+            '''), {'days': settings.session_retention_days, 'batch': BATCH_SIZE})).scalars().all()
             for session_id in expired:
                 await connection.execute(text('DELETE FROM game_sessions WHERE id = :id'), {'id': session_id})
             counts['sessions_deleted'] = len(expired)
 
-            histories = await connection.execute(text('''
+            histories = (await connection.execute(text('''
                 SELECT id FROM game_sessions WHERE status <> 'active' AND history_purged_at IS NULL
                   AND completed_at <= now() - make_interval(days => :days)
                 ORDER BY completed_at LIMIT :batch FOR UPDATE SKIP LOCKED
-            '''), {'days': settings.history_retention_days, 'batch': BATCH_SIZE}).scalars().all()
+            '''), {'days': settings.history_retention_days, 'batch': BATCH_SIZE})).scalars().all()
             for session_id in histories:
                 await connection.execute(text('DELETE FROM session_messages WHERE session_id = :id'), {'id': session_id})
                 await connection.execute(text('''

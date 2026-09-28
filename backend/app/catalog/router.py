@@ -144,9 +144,9 @@ async def get_storyline(
 @router.get('/storylines/{storyline_id}/progress')
 async def storyline_progress(storyline_id: UUID, current_user: Annotated[dict, Depends(get_current_user)]):
     async with engine.connect() as connection:
-        exists = await connection.execute(text('''
+        exists = (await connection.execute(text('''
             SELECT 1 FROM storylines WHERE id=:id AND status='published'
-        '''), {'id': storyline_id}).scalar_one_or_none()
+        '''), {'id': storyline_id})).scalar_one_or_none()
         if exists is None:
             raise HTTPException(status_code=404, detail='Storyline not found')
         return {'missions': await get_story_progress(connection, storyline_id, current_user['id'])}

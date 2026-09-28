@@ -377,7 +377,7 @@ class GameService:
                     ],
                 }
 
-            pending = await connection.execute(
+            pending = (await connection.execute(
                 text(
                     """
                     SELECT id
@@ -391,7 +391,7 @@ class GameService:
                 {
                     "session_id": session_id,
                 },
-            ).scalar_one_or_none()
+            )).scalar_one_or_none()
 
             if pending is not None:
                 return {
@@ -405,7 +405,7 @@ class GameService:
                     },
                 }
 
-            max_sequence = await connection.execute(
+            max_sequence = (await connection.execute(
                 text(
                     """
                     SELECT COALESCE(
@@ -419,7 +419,7 @@ class GameService:
                 {
                     "session_id": session_id,
                 },
-            ).scalar_one()
+            )).scalar_one()
 
             next_sequence = max(
                 int(

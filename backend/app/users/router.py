@@ -56,7 +56,7 @@ async def get_my_stats(current_user: Annotated[dict, Depends(get_current_user)])
             FROM game_sessions
             WHERE user_id=:user_id AND history_purged_at IS NULL
         '''), {'user_id': current_user['id']})).mappings().one()
-        story_successes = await connection.execute(text('''
+        story_successes = (await connection.execute(text('''
             SELECT count(*) FROM story_mission_progress WHERE user_id=:user_id
-        '''), {'user_id': current_user['id']}).scalar_one()
+        '''), {'user_id': current_user['id']})).scalar_one()
     return {**dict(row), 'story_successes': story_successes}
