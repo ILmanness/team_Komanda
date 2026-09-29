@@ -174,10 +174,6 @@ def apply(knowledge, trainings):
             })
             counts['training'] += 1
 
-        # Retain rows referenced by old sessions but remove mock catalog entries.
-        connection.execute(text("UPDATE missions SET status='archived' WHERE title LIKE 'Демо · %'"))
-        connection.execute(text("UPDATE storylines SET status='archived' WHERE slug LIKE 'demo-%'"))
-        connection.execute(text("UPDATE knowledge_items SET status='archived' WHERE slug LIKE 'demo-%'"))
     return counts
 
 
