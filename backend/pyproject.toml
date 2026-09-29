@@ -1,3 +1,20 @@
+[project]
+name = "negotiation-arena-backend"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.53.0",
+    "pydantic-settings==2.15.0",
+    "sqlalchemy==2.0.54",
+    "psycopg[binary]==3.3.6",
+    "alembic==1.20.0",
+    "httpx==0.28.1",
+    "PyJWT==2.10.1",
+    "pwdlib[argon2]==0.2.1",
+    "email-validator==2.3.0",
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
