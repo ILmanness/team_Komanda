@@ -82,8 +82,11 @@ export function GameDialog() {
   const [error, setError] = useState('');
   const [optimistic, setOptimistic] = useState('');
   const [streamed, setStreamed] = useState('');
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackError, setFeedbackError] = useState('');
   const socketRef = useRef<WebSocket | null>(null);
   const pendingKey = useRef<{ text: string; key: string } | null>(null);
+  const requestedFeedback = useRef(new Set<string>());
 
   useEffect(() => {
     const token = sessionStorage.getItem('arena_token');
@@ -103,6 +106,27 @@ export function GameDialog() {
     api.missionBriefing(session.mission_id, controller.signal).then(setBriefing).catch(() => undefined);
     return () => controller.abort();
   }, [session?.mission_id]);
+
+  async function loadFeedback(sessionId: string) {
+    const token = sessionStorage.getItem('arena_token');
+    if (!token || requestedFeedback.current.has(sessionId)) return;
+    requestedFeedback.current.add(sessionId);
+    setFeedbackLoading(true); setFeedbackError('');
+    try {
+      const feedback = await api.sessionFeedback(token, sessionId);
+      setSession(previous => previous ? { ...previous, final_result: { ...(previous.final_result || {}), feedback } } : previous);
+    } catch (cause) {
+      setFeedbackError(errorText(cause));
+    } finally {
+      setFeedbackLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!session || session.status === 'active' || session.ai_mode !== 'compatible' ||
+        !['story', 'custom'].includes(session.mode) || session.final_result?.feedback) return;
+    void loadFeedback(session.id);
+  }, [session?.id, session?.status, session?.ai_mode, session?.mode, session?.final_result?.feedback]);
 
   useEffect(() => {
     if (!user || session?.status !== 'active' || session.state.node_id) return;
@@ -206,7 +230,7 @@ export function GameDialog() {
       : session.mode === 'story' ? 'Следующая сцена останется закрытой. Попробуйте ещё раз.' : 'Вы можете перечитать разговор или попробовать ещё раз.';
   return <div className="section-wrap dialog-page">
     <Link className="back-link" to={back}>← Назад</Link>
-    <div className="dialog-heading"><div><span className="eyebrow">{session.mode === 'story' ? 'Сюжет' : 'Тренировка'}</span><h1>{name}</h1><p>{briefing?.title || session.mission_title || custom?.situation}</p></div><span className="pill">{session.state.turn || 0} реплик</span></div>
+    <div className="dialog-heading"><div><span className="eyebrow">{session.mode === 'story' ? 'Сюжет' : session.mode === 'custom' ? 'Свой диалог' : 'Тренировка'}</span><h1>{name}</h1><p>{briefing?.title || session.mission_title || custom?.situation}</p></div><span className="pill">{session.state.turn || 0} реплик</span></div>
     <div className="dialog-layout"><aside className="dialog-brief"><details className="dialog-info"><summary>Информация о разговоре <span>↗</span></summary><div className="dialog-info-content">
       <dl><dt>Ситуация</dt><dd>{briefing?.situation || session.mission_situation || custom?.situation || 'Детали ситуации не указаны. Уточните их у собеседника.'}</dd>
         {(briefing?.public_context || session.mission_public_context) && <><dt>Что известно</dt><dd>{briefing?.public_context || session.mission_public_context}</dd></>}
@@ -229,7 +253,18 @@ export function GameDialog() {
           {error && <p className="form-error" role="alert">{error}</p>}
           {connection === 'disconnected' && <button className="button outline" type="button" onClick={() => setReconnect(value => value + 1)}>Подключиться снова</button>}
           <div><button className="button outline" type="button" onClick={finish} disabled={pending}>Завершить диалог</button><button className="button primary" type="submit" disabled={pending || connection !== 'ready' || !text.trim()}>{pending ? 'Ждём ответа…' : connection === 'connecting' ? 'Подключаемся…' : 'Отправить'} <span>→</span></button></div></form>
-          : <div className="dialog-complete"><strong>{resultTitle}</strong><p>{resultDescription}</p><div className="dialog-result-actions"><Link to={nextLink} className="button primary">{nextLabel} <span>↗</span></Link>{session.mode === 'story' && result !== 'success' && session.mission_id && <Link to={`/story/mission/${session.mission_id}`} className="button outline">Попробовать ещё раз</Link>}</div></div>}
+          : <div className="dialog-complete"><strong>{resultTitle}</strong><p>{resultDescription}</p>
+            {(session.mode === 'story' || session.mode === 'custom') && <section className="dialog-feedback" aria-label="Разбор разговора"><h2>Разбор разговора</h2>
+              {session.final_result?.feedback ? <><p>{session.final_result.feedback.summary}</p>
+                {session.final_result.feedback.strengths.length > 0 && <div><h3>Что получилось</h3><ul>{session.final_result.feedback.strengths.map((item, index) => <li key={index}><strong>{item.point}</strong><blockquote>«{item.quote}»</blockquote></li>)}</ul></div>}
+                {session.final_result.feedback.improvements.length > 0 && <div><h3>Что попробовать иначе</h3><ul>{session.final_result.feedback.improvements.map((item, index) => <li key={index}><strong>{item.point}</strong><blockquote>«{item.quote}»</blockquote><p>Попробуйте: {item.try_instead}</p></li>)}</ul></div>}
+                <p><strong>Следующий шаг:</strong> {session.final_result.feedback.next_step}</p></>
+                : session.ai_mode === 'mock' ? <p>Разбор ИИ появится после подключения модели.</p>
+                  : feedbackLoading ? <p role="status">Готовим разбор вашего разговора…</p>
+                    : feedbackError ? <><p role="alert">{feedbackError}</p><button type="button" className="button outline" onClick={() => { requestedFeedback.current.delete(session.id); void loadFeedback(session.id); }}>Попробовать ещё раз</button></>
+                      : <p>Готовим разбор вашего разговора…</p>}
+            </section>}
+            <div className="dialog-result-actions"><Link to={nextLink} className="button primary">{nextLabel} <span>↗</span></Link>{session.mode === 'story' && result !== 'success' && session.mission_id && <Link to={`/story/mission/${session.mission_id}`} className="button outline">Попробовать ещё раз</Link>}</div></div>}
       </section>
     </div>
   </div>;

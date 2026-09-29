@@ -29,6 +29,7 @@ from app.main import app
 from app.sessions import router as sessions_router
 from app.sessions import guided as guided_router
 from app.sessions import branching as branching_router
+from app.sessions import feedback as feedback_router
 from app.sessions import websocket as sessions_websocket
 from app.users import router as users_router
 
@@ -125,6 +126,72 @@ def create_session(connection, days=None, idle_days=0):
     return session_id
 
 
+def test_completed_dialogue_feedback_is_grounded_private_and_saved_once(database, monkeypatch):
+    monkeypatch.setattr(auth_dependencies, 'engine', database)
+    monkeypatch.setattr(sessions_router, 'engine', database)
+    monkeypatch.setattr(feedback_router, 'engine', database)
+    monkeypatch.setattr(feedback_router, 'get_settings',
+                        lambda: SimpleNamespace(ai_provider='compatible'))
+    with database.begin() as connection:
+        session_id = create_session(connection)
+        owner_id = connection.execute(text(
+            'SELECT user_id FROM game_sessions WHERE id=:id'
+        ), {'id': session_id}).scalar_one()
+        stranger_id = connection.execute(text(
+            "INSERT INTO users(display_name) VALUES ('Other') RETURNING id"
+        )).scalar_one()
+    calls = []
+
+    class FeedbackProvider(MockLLMProvider):
+        async def generate_structured(self, messages, response_model):
+            calls.append(messages)
+            return response_model.model_validate({
+                'summary': 'Вы начали обсуждать проблему, но не согласовали следующий шаг.',
+                'strengths': [{'point': 'Начали разговор', 'quote': 'private text'}],
+                'improvements': [
+                    {'point': 'Уточните срок', 'quote': 'private text',
+                     'try_instead': 'Какой срок для вас важен?'},
+                    {'point': 'Не подтверждено', 'quote': 'выдуманная реплика',
+                     'try_instead': 'Давайте уточним задачу.'},
+                ],
+                'next_step': 'Потренируйте уточняющий вопрос.',
+            })
+
+    monkeypatch.setattr(feedback_router, 'get_provider', FeedbackProvider)
+    client = TestClient(app)
+    owner = {'Authorization': f'Bearer {create_access_token(owner_id)}'}
+    stranger = {'Authorization': f'Bearer {create_access_token(stranger_id)}'}
+    url = f'/api/v1/sessions/{session_id}/feedback'
+    assert client.post(url, headers=owner).status_code == 409
+    with database.begin() as connection:
+        connection.execute(text('''
+            UPDATE game_sessions SET status='completed', completed_at=now(),
+                final_result=:result WHERE id=:id
+        '''), {'id': session_id, 'result': Jsonb({'result': 'finished'})})
+    assert client.post(url, headers=stranger).status_code == 404
+    first = client.post(url, headers=owner)
+    assert first.status_code == 200, first.text
+    assert len(first.json()['strengths']) == 1
+    assert len(first.json()['improvements']) == 1
+    assert len(calls) == 1
+    assert client.post(url, headers=owner).json() == first.json()
+    assert len(calls) == 1
+    saved = client.get(f'/api/v1/sessions/{session_id}', headers=owner).json()
+    assert saved['final_result']['result'] == 'finished'
+    assert saved['final_result']['feedback'] == first.json()
+    with database.begin() as connection:
+        topic_id = connection.execute(text("INSERT INTO knowledge_items(slug, item_type, title) VALUES ('topic-feedback', 'topic', 'Тема') RETURNING id")).scalar_one()
+        mission_id = connection.execute(text("""
+            INSERT INTO missions(knowledge_item_id, mission_type, interaction_type, title, task)
+            VALUES (:topic, 'method_training', 'single_choice', 'Тренировка', 'Выберите ответ') RETURNING id
+        """), {'topic': topic_id}).scalar_one()
+        training_id = connection.execute(text("""
+            INSERT INTO game_sessions(user_id, mission_id, mode, status, completed_at)
+            VALUES (:user, :mission, 'method_training', 'completed', now()) RETURNING id
+        """), {'user': owner_id, 'mission': mission_id}).scalar_one()
+    assert client.post(f'/api/v1/sessions/{training_id}/feedback', headers=owner).status_code == 409
+
+
 def test_hint_endpoint_limits_one_per_turn_and_records_penalty(database, monkeypatch):
     monkeypatch.setattr(sessions_router, 'engine', database)
     monkeypatch.setattr(auth_dependencies, 'engine', database)
@@ -186,6 +253,9 @@ def test_retention_dry_run_and_apply(database):
         old = create_session(connection, days=8)
         expired = create_session(connection, days=31)
         idle = create_session(connection, idle_days=31)
+        connection.execute(text('UPDATE game_sessions SET final_result=:result WHERE id=:id'),
+                           {'id': old, 'result': Jsonb({'result': 'finished',
+                                                        'feedback': {'summary': 'private review'}})})
     expected = {'abandoned': 1, 'histories_purged': 1, 'sessions_deleted': 1, 'tokens_purged': 0}
     assert asyncio.run(retention.cleanup()) == expected
     with database.connect() as connection:
@@ -196,8 +266,9 @@ def test_retention_dry_run_and_apply(database):
         assert connection.execute(text('SELECT count(*) FROM game_sessions WHERE id = :id'), {'id': expired}).scalar() == 0
         for session_id in (active, idle):
             assert connection.execute(text('SELECT count(*) FROM session_messages WHERE session_id = :id'), {'id': session_id}).scalar() == 2
-        row = connection.execute(text('SELECT custom_context, memory_summary, history_purged_at FROM game_sessions WHERE id = :id'), {'id': old}).one()
+        row = connection.execute(text('SELECT custom_context, memory_summary, history_purged_at, final_result FROM game_sessions WHERE id = :id'), {'id': old}).one()
         assert row[0] == row[1] == {} and row[2] is not None
+        assert row[3] == {'result': 'finished'}
     assert asyncio.run(retention.cleanup(apply=True)) == {'abandoned': 0, 'histories_purged': 0, 'sessions_deleted': 0, 'tokens_purged': 0}
 
 

@@ -72,6 +72,12 @@ export type CustomSessionSettings = {
 };
 
 export type SessionMode = 'custom' | 'story' | 'method_training';
+export type DialogueFeedback = {
+  summary: string;
+  strengths: { point: string; quote: string }[];
+  improvements: { point: string; quote: string; try_instead: string }[];
+  next_step: string;
+};
 
 export type GameSession = {
   id: string;
@@ -91,7 +97,7 @@ export type GameSession = {
   character_behavior_description?: string | null;
   custom_context: CustomSessionSettings | null;
   state: { turn?: number; contact?: number; tension?: number; progress?: number; score?: number; node_id?: string; goal_state?: { status: 'unresolved' | 'advancing' | 'achieved' | 'blocked'; review_available?: boolean } };
-  final_result: { result?: string; reason?: string; score?: number } | null;
+  final_result: { result?: string; reason?: string; score?: number; feedback?: DialogueFeedback } | null;
   ai_mode: 'none' | 'mock' | 'compatible';
 };
 
@@ -260,6 +266,9 @@ export const api = {
     signal, headers: { Authorization: `Bearer ${token}` },
   }),
   finishSession: (token: string, id: string) => request<{ status: GameSession['status'] }>(`/v1/sessions/${encodeURIComponent(id)}/finish`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  }),
+  sessionFeedback: (token: string, id: string) => request<DialogueFeedback>(`/v1/sessions/${encodeURIComponent(id)}/feedback`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}` },
   }),
   guided: (token: string, id: string, signal?: AbortSignal) => request<GuidedTraining>(`/v1/sessions/${encodeURIComponent(id)}/guided`, {

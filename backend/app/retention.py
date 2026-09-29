@@ -54,7 +54,10 @@ async def cleanup(apply: bool = False) -> dict[str, int]:
                 await connection.execute(text('''
                     UPDATE game_sessions SET state = '{}', memory_summary = '{}',
                         custom_context = CASE WHEN mode = 'custom' THEN '{}'::jsonb ELSE NULL END,
-                        config_snapshot = '{}', history_purged_at = now(),
+                        config_snapshot = '{}',
+                        final_result = CASE WHEN final_result IS NULL THEN NULL
+                            ELSE final_result - 'feedback' END,
+                        history_purged_at = now(),
                         lock_version = lock_version + 1 WHERE id = :id
                 '''), {'id': session_id})
             counts['histories_purged'] = len(histories)

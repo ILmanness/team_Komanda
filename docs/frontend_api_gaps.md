@@ -10,6 +10,7 @@
 | Сюжет | `GET /api/v1/storylines/{id}/progress`, брифинг и `POST /api/v1/sessions` |
 | Свой диалог | `POST /api/v1/sessions` с `custom_context` |
 | Свободный ход | `WS /api/v1/ws/sessions/{id}` и `GET /api/v1/sessions/{id}/messages` |
+| Разбор завершённого диалога | `POST /api/v1/sessions/{id}/feedback`; сохранённый результат приходит в `GET /api/v1/sessions/{id}` |
 | Пошаговая тренировка | `GET /api/v1/sessions/{id}/guided`, `POST .../guided/choice`, `POST .../guided/answer` |
 | База знаний | Список, детали, отметка прочтения, тест, сохранение попытки |
 | Админка | `GET /api/v1/admin/overview`, создание и изменение материалов и их статуса |
