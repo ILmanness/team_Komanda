@@ -8,6 +8,7 @@ from sqlalchemy import text
 from app.auth.dependencies import get_current_user
 from app.config import get_settings
 from app.db import engine
+from app.game.goal_tracker import GoalTracker
 from app.game.hints import HintGenerator, hint_limit
 from app.game.scoring import Scoring
 from app.story_progress import get_story_progress
@@ -310,6 +311,14 @@ async def create_session(
         if mission is not None and mission['interaction_type'] == 'guided_training':
             guided = (mission['config'] or {}).get('guided') or {}
             initial_state = {'turn': 0, 'node_id': guided['start_node_id'], 'events': []}
+        elif data.mode == 'custom' or (mission is not None and mission['interaction_type'] == 'ai_dialogue'):
+            scenario_goal = (
+                data.custom_context.get('goal')
+                if data.mode == 'custom'
+                else mission['task'] if mission is not None else None
+            )
+            if isinstance(scenario_goal, str) and scenario_goal.strip():
+                initial_state['goal_state'] = GoalTracker.initial(scenario_goal)
 
         config_snapshot = {
             "mode": data.mode,
@@ -635,6 +644,7 @@ async def finish_session(
                 """
                 SELECT
                     id,
+                    mode,
                     status,
                     final_result,
                     completed_at
@@ -666,7 +676,7 @@ async def finish_session(
             )
 
         final_result = {
-            "result": "failure",
+            "result": "finished" if session["mode"] == "custom" else "failure",
             "reason": "user_finished",
             "completed_by": "player",
         }

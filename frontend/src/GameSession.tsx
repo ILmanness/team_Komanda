@@ -197,12 +197,25 @@ export function GameDialog() {
   if (streamed) lines.push({ key: `${lines.length}-assistant`, role: 'assistant', content: streamed });
   const slug = briefing?.character?.slug || session.character_slug;
   const character = session.mode === 'method_training' ? 'mentor' : slug === 'demo-igor' || /игор/i.test(name) ? 'igor' : 'anna';
+  const result = session.final_result?.result;
+  const goalState = session.state.goal_state;
+  const goalStatusLabel = !goalState?.review_available ? 'Цель пока не проверена' : {
+    unresolved: 'Цель пока не достигнута',
+    advancing: 'Есть продвижение к цели',
+    achieved: 'Цель достигнута',
+    blocked: 'Есть препятствие',
+  }[goalState.status];
+  const resultTitle = result === 'success' ? 'Разговор пройден' : result === 'finished' ? 'Диалог завершён' : 'Разговор не пройден';
+  const resultDescription = result === 'success'
+    ? session.mode === 'story' ? 'Следующая сцена открыта.' : 'Цель достигнута.'
+    : result === 'finished' ? 'Результат переговоров не определён.'
+      : session.mode === 'story' ? 'Следующая сцена останется закрытой. Попробуйте ещё раз.' : 'Вы можете перечитать разговор или попробовать ещё раз.';
   return <div className="section-wrap dialog-page">
     <Link className="back-link" to={back}>← Назад</Link>
     <div className="dialog-heading"><div><span className="eyebrow">{session.mode === 'story' ? 'Сюжет' : 'Тренировка'}</span><h1>{name}</h1><p>{briefing?.title || session.mission_title || custom?.situation}</p></div><span className="pill">{session.state.turn || 0} реплик</span></div>
     <div className="dialog-layout"><aside className="dialog-brief"><span className="eyebrow">Ваша задача</span><h2>{goal}</h2>
       {custom && <dl><dt>Ваша роль</dt><dd>{custom.player_role}</dd><dt>Собеседник</dt><dd>{custom.opponent_role}</dd></dl>}
-      {(session.ai_mode !== 'mock' || choiceTraining) && <div className="game-state"><span>Контакт {session.state.contact ?? 0}</span><span>Напряжение {session.state.tension ?? 0}</span><span>Прогресс {session.state.progress ?? 0}</span></div>}
+      {(session.ai_mode !== 'mock' || choiceTraining) && <div className="game-state"><span>Контакт {session.state.contact ?? 0}</span><span>Напряжение {session.state.tension ?? 0}</span><span>{goalState ? 'Прогресс к цели' : 'Прогресс'} {session.state.progress ?? 0}{goalState && '/100'}</span>{goalState && <span>{goalStatusLabel}</span>}</div>}
       {session.mode === 'custom' && <Link to="/training/custom" className="text-link">Новый свой диалог ↗</Link>}</aside>
       <section className="dialog-main" aria-label="Диалог"><NovelStage lines={lines} name={session.mode === 'method_training' ? 'Старшая коллега' : name} playerName={user.display_name} character={character} waiting={pending && !streamed} />
         {session.ai_mode === 'mock' && !choiceTraining && <p className="dialog-demo-note">Демо-режим: ответы собеседника заготовлены. Игровая оценка здесь не отражает качество переговоров.</p>}
@@ -213,7 +226,7 @@ export function GameDialog() {
           {error && <p className="form-error" role="alert">{error}</p>}
           {connection === 'disconnected' && <button className="button outline" type="button" onClick={() => setReconnect(value => value + 1)}>Подключиться снова</button>}
           <div><button className="button outline" type="button" onClick={finish} disabled={pending}>Завершить диалог</button><button className="button primary" type="submit" disabled={pending || connection !== 'ready' || !text.trim()}>{pending ? 'Ждём ответа…' : connection === 'connecting' ? 'Подключаемся…' : 'Отправить'} <span>→</span></button></div></form>
-          : <div className="dialog-complete"><strong>{session.final_result?.result === 'success' ? 'Разговор пройден' : 'Разговор не пройден'}</strong><p>{session.final_result?.result === 'success' ? session.mode === 'story' ? 'Следующая сцена открыта.' : 'Цель достигнута.' : session.mode === 'story' ? 'Следующая сцена останется закрытой. Попробуйте ещё раз.' : 'Вы можете перечитать разговор или попробовать ещё раз.'}</p><div className="dialog-result-actions"><Link to={nextLink} className="button primary">{nextLabel} <span>↗</span></Link>{session.mode === 'story' && session.final_result?.result !== 'success' && session.mission_id && <Link to={`/story/mission/${session.mission_id}`} className="button outline">Попробовать ещё раз</Link>}</div></div>}
+          : <div className="dialog-complete"><strong>{resultTitle}</strong><p>{resultDescription}</p><div className="dialog-result-actions"><Link to={nextLink} className="button primary">{nextLabel} <span>↗</span></Link>{session.mode === 'story' && result !== 'success' && session.mission_id && <Link to={`/story/mission/${session.mission_id}`} className="button outline">Попробовать ещё раз</Link>}</div></div>}
       </section>
     </div>
   </div>;

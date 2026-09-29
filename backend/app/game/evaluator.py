@@ -28,6 +28,8 @@ class Evaluator:
         )
         if attack:
             result = self._personal_attack_evaluation(attack.group())
+        elif self._is_courtesy_closure(player_message):
+            result = self._courtesy_closure_evaluation(player_message)
         elif self._is_non_semantic(player_message):
             result = self._neutral_evaluation('Реплика не содержит понятного переговорного действия.')
         elif isinstance(self.provider, MockLLMProvider) and self.provider.demo_evaluation:
@@ -71,12 +73,14 @@ class Evaluator:
             if letter not in marked_letters:
                 setattr(result.profile_fit, letter, 0)
         if not grounded_features:
-            result.intent = 'unknown'
+            result.intent = self._fallback_intent(player_message)
             result.observations.conversation_progress = 'neutral'
             result.proposed_event.action_type = 'neutral'
             result.proposed_event.critical_flags = []
             if discarded:
                 result.explanation.reason = 'Нет подтверждённых текстовых признаков для оценки.'
+        else:
+            self._correct_contradictory_negative(result)
         if discarded:
             logger.warning('Evaluator discarded %d ungrounded evidence items', discarded)
 
@@ -86,6 +90,61 @@ class Evaluator:
             code for code in result.hint_basis if code in observed_codes
         ))
         return result.model_dump()
+
+    @staticmethod
+    def _fallback_intent(message: str) -> str:
+        """Give substantial, unclassified turns neutral credit without fake evidence."""
+        words = re.findall(r'\w+', message, flags=re.UNICODE)
+        if len(message.strip()) < 30 or len(words) < 5:
+            return 'unknown'
+        return 'question' if '?' in message else 'negotiation'
+
+    @staticmethod
+    def _correct_contradictory_negative(result: TurnEvaluation) -> None:
+        """Require grounded negative evidence before penalizing a player turn."""
+        if result.proposed_event.action_type != 'negative' or result.proposed_event.critical_flags:
+            return
+        codes = {feature.code for feature in result.observations.features}
+        negative_signals = {
+            'personal_attack', 'threat', 'pressure', 'coercion', 'ultimatum',
+            'proposal_before_interest', 'specificity', 'manipulation',
+            'hard_constraint_breach', 'confidentiality_breach',
+            'unauthorized_commitment', 'false_fact_assertion',
+            'mandatory_step_skipped',
+        }
+        negative_fragments = (
+            'attack', 'threat', 'pressure', 'coerc', 'ultimatum',
+            'breach', 'violat', 'unauthorized', 'false_fact',
+            'premature', 'manipulat',
+        )
+        if codes & negative_signals or any(
+            fragment in code for code in codes for fragment in negative_fragments
+        ):
+            return
+        if any(getattr(result.profile_fit, letter) < 0 for letter in 'PAEI'):
+            return
+        progress = result.observations.conversation_progress
+        if progress == 'backward':
+            return
+        proposal_support = {
+            'interest_question', 'priority_clarity', 'commitment',
+            'agreement_seek', 'arrangement', 'contingency',
+            'process_detail', 'condition', 'constraint',
+        }
+        if progress == 'forward' or (
+            'proposal' in codes and codes.intersection(proposal_support)
+        ):
+            result.proposed_event.action_type = 'positive'
+            result.observations.conversation_progress = 'forward'
+            result.explanation.reason = (
+                'Подтверждено продвижение переговоров без негативных признаков.'
+            )
+        else:
+            result.proposed_event.action_type = 'neutral'
+            result.observations.conversation_progress = 'neutral'
+            result.explanation.reason = (
+                'Негативное действие не подтверждено признаками реплики.'
+            )
 
     @staticmethod
     def _is_non_semantic(message: str) -> bool:
@@ -98,6 +157,27 @@ class Evaluator:
         return bool(re.fullmatch(r'(.{1,4})\1+', word)) or (
             len(word) >= 6 and not re.search(r'[аеёиоуыэюяaeiouy]', word)
         )
+
+    @staticmethod
+    def _is_courtesy_closure(message: str) -> bool:
+        return bool(re.fullmatch(
+            r'(?iu)\s*(?:(?:до свидания|всего доброго|до встречи|до связи|'
+            r'хорошего дня|доброго вам дня|спасибо за разговор)\s*[.!?,;]?\s*){1,3}',
+            message,
+        ))
+
+    @staticmethod
+    def _courtesy_closure_evaluation(message: str) -> TurnEvaluation:
+        return TurnEvaluation.model_validate({
+            'schema_version': 'ai10-v1', 'intent': 'greeting',
+            'observations': {'conversation_progress': 'neutral', 'features': [
+                {'code': 'courtesy_closure', 'evidence': message.strip()[:500]},
+            ]},
+            'profile_fit': {'P': 0, 'A': 0, 'E': 0, 'I': 0},
+            'proposed_event': {'action_type': 'neutral', 'critical_flags': []},
+            'explanation': {'reason': 'Вежливое завершение разговора не ухудшает переговоры.'},
+            'paei_markers': [], 'hint_basis': [],
+        })
 
     @staticmethod
     def _neutral_evaluation(reason: str) -> TurnEvaluation:

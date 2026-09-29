@@ -9,11 +9,134 @@ import pytest
 from app.ai import MockLLMProvider
 from app.game.evaluator import Evaluator
 from app.game.game_engine import GameEngine
+from app.game.service import GameService
 
 REFERENCE = json.loads(
     (Path(__file__).resolve().parents[2] / 'content/evaluator_reference_cases.json')
     .read_text(encoding='utf-8')
 )
+
+
+@pytest.mark.parametrize('message', [
+    'До свидания. До связи',
+    'Хорошего дня!',
+    'Всего доброго.',
+])
+def test_polite_closure_is_neutral_and_calm(message):
+    result = asyncio.run(Evaluator(MockLLMProvider()).evaluate(
+        context={}, player_message=message,
+    ))
+    assert result['proposed_event']['action_type'] == 'neutral'
+    assert result['observations']['features'][0]['code'] == 'courtesy_closure'
+    assert GameService._opponent_emotion(result, {'tension': 6}) == 'neutral'
+    assert GameService._courtesy_opponent_response() == 'До свидания. Спасибо за разговор.'
+
+
+def test_negotiating_sentence_with_farewell_is_not_treated_as_pure_closure():
+    assert not Evaluator._is_courtesy_closure(
+        'До свидания, но сначала подтвердите срок поставки.',
+    )
+
+
+@pytest.mark.parametrize(('message', 'progress', 'features'), [
+    (
+        'Предлагаю поставить вывеску завтра. Что для вас важнее?',
+        'neutral',
+        [('proposal', 'Предлагаю поставить вывеску завтра'),
+         ('interest_question', 'Что для вас важнее?')],
+    ),
+    (
+        'Подготовлю два макета. До монтажа покажу схему крепления.',
+        'forward',
+        [('proposal', 'Подготовлю два макета'),
+         ('commitment', 'До монтажа покажу схему крепления')],
+    ),
+    (
+        'Зафиксируем порядок. Если проверка не пройдёт, предложу запасной вариант.',
+        'forward',
+        [('agreement_fixation', 'Зафиксируем порядок'),
+         ('contingency', 'Если проверка не пройдёт, предложу запасной вариант')],
+    ),
+    (
+        'Предлагаю критерии приёмки: окно остаётся открытым. Подтверждаете?',
+        'neutral',
+        [('proposal', 'Предлагаю критерии приёмки'),
+         ('constraint', 'окно остаётся открытым'),
+         ('agreement_seek', 'Подтверждаете?')],
+    ),
+])
+def test_grounded_constructive_proposal_is_not_penalized(message, progress, features):
+    payload = {
+        'schema_version': 'ai10-v1', 'intent': 'proposal',
+        'observations': {'conversation_progress': progress, 'features': [
+            {'code': code, 'evidence': evidence} for code, evidence in features
+        ]},
+        'profile_fit': {'P': 0, 'A': 0, 'E': 0, 'I': 0},
+        'proposed_event': {'action_type': 'negative', 'critical_flags': []},
+        'explanation': {'reason': 'Противоречивый класс.'},
+        'paei_markers': [], 'hint_basis': [],
+    }
+    result = asyncio.run(Evaluator(MockLLMProvider(structured_response=payload)).evaluate(
+        context={}, player_message=message,
+    ))
+    assert result['proposed_event']['action_type'] == 'positive'
+    assert result['observations']['conversation_progress'] == 'forward'
+
+
+def test_premature_proposal_keeps_negative_classification():
+    message = 'Давайте сразу уберём половину функций из первого релиза.'
+    payload = {
+        'schema_version': 'ai10-v1', 'intent': 'proposal',
+        'observations': {'conversation_progress': 'backward', 'features': [
+            {'code': 'proposal', 'evidence': 'Давайте сразу уберём половину функций'},
+            {'code': 'proposal_before_interest', 'evidence': message},
+        ]},
+        'profile_fit': {'P': 0, 'A': 0, 'E': 0, 'I': 0},
+        'proposed_event': {'action_type': 'negative', 'critical_flags': []},
+        'explanation': {'reason': 'Предложение преждевременно.'},
+        'paei_markers': [], 'hint_basis': [],
+    }
+    result = asyncio.run(Evaluator(MockLLMProvider(structured_response=payload)).evaluate(
+        context={}, player_message=message,
+    ))
+    assert result['proposed_event']['action_type'] == 'negative'
+
+
+def test_pressure_is_not_reclassified_as_positive():
+    message = 'Предлагаю план, но требую вашего ответа прямо сейчас.'
+    payload = {
+        'schema_version': 'ai10-v1', 'intent': 'proposal',
+        'observations': {'conversation_progress': 'forward', 'features': [
+            {'code': 'proposal', 'evidence': 'Предлагаю план'},
+            {'code': 'pressure', 'evidence': 'требую вашего ответа прямо сейчас'},
+        ]},
+        'profile_fit': {'P': 0, 'A': 0, 'E': 0, 'I': 0},
+        'proposed_event': {'action_type': 'negative', 'critical_flags': []},
+        'explanation': {'reason': 'Давление ухудшает контакт.'},
+        'paei_markers': [], 'hint_basis': [],
+    }
+    result = asyncio.run(Evaluator(MockLLMProvider(structured_response=payload)).evaluate(
+        context={}, player_message=message,
+    ))
+    assert result['proposed_event']['action_type'] == 'negative'
+
+
+def test_unsupported_negative_label_becomes_neutral():
+    message = 'Спасибо за уточнение.'
+    payload = {
+        'schema_version': 'ai10-v1', 'intent': 'clarification',
+        'observations': {'conversation_progress': 'neutral', 'features': [
+            {'code': 'courtesy', 'evidence': message},
+        ]},
+        'profile_fit': {'P': 0, 'A': 0, 'E': 0, 'I': 0},
+        'proposed_event': {'action_type': 'negative', 'critical_flags': []},
+        'explanation': {'reason': 'Модель выбрала отрицательный класс без оснований.'},
+        'paei_markers': [], 'hint_basis': [],
+    }
+    result = asyncio.run(Evaluator(MockLLMProvider(structured_response=payload)).evaluate(
+        context={}, player_message=message,
+    ))
+    assert result['proposed_event']['action_type'] == 'neutral'
 
 
 def candidate_for(case: dict) -> dict:
@@ -244,3 +367,21 @@ def test_malformed_model_json_uses_neutral_fallback():
     )).evaluate(context={}, player_message='Что вы думаете о сроке?'))
     assert result['proposed_event']['action_type'] == 'neutral'
     assert result['observations']['features'] == []
+
+
+def test_substantial_message_gets_neutral_credit_when_model_returns_no_features():
+    message = 'Предлагаю проверить QR-меню на разных телефонах. Какие блюда важнее?'
+    result = asyncio.run(Evaluator(MockLLMProvider(
+        structured_response='Некорректный JSON',
+    )).evaluate(context={}, player_message=message))
+    assert result['intent'] == 'question'
+    assert result['observations']['features'] == []
+    assert GameEngine().apply_evaluation(state={'progress': 0}, evaluation=result)['progress'] == 2
+
+
+def test_short_reply_still_gets_no_progress_after_model_failure():
+    result = asyncio.run(Evaluator(MockLLMProvider(
+        structured_response='Некорректный JSON',
+    )).evaluate(context={}, player_message='ок'))
+    assert result['intent'] == 'unknown'
+    assert GameEngine().apply_evaluation(state={'progress': 0}, evaluation=result)['progress'] == 0

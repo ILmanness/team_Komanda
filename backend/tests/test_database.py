@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app import retention
 from app.admin import router as admin_router
@@ -30,6 +32,38 @@ from app.users import router as users_router
 pytestmark = pytest.mark.skipif(os.getenv('RUN_DB_TESTS') != '1', reason='Requires PostgreSQL')
 
 
+class DualContext:
+    """Use the same isolated schema from synchronous setup and async app code."""
+
+    def __init__(self, sync_context, async_context):
+        self.sync_context = sync_context
+        self.async_context = async_context
+
+    def __enter__(self):
+        return self.sync_context.__enter__()
+
+    def __exit__(self, *args):
+        return self.sync_context.__exit__(*args)
+
+    async def __aenter__(self):
+        return await self.async_context.__aenter__()
+
+    async def __aexit__(self, *args):
+        return await self.async_context.__aexit__(*args)
+
+
+class DatabasePair:
+    def __init__(self, sync_engine, async_engine):
+        self.sync_engine = sync_engine
+        self.async_engine = async_engine
+
+    def begin(self):
+        return DualContext(self.sync_engine.begin(), self.async_engine.begin())
+
+    def connect(self):
+        return DualContext(self.sync_engine.connect(), self.async_engine.connect())
+
+
 def migrate(engine, revision='head', downgrade=False):
     config = Config(str(Path(__file__).parents[1] / 'alembic.ini'))
     with engine.begin() as connection:
@@ -46,7 +80,12 @@ def database(monkeypatch, request):
     admin = create_engine(get_settings().database_url)
     with admin.begin() as connection:
         connection.execute(text(f'CREATE SCHEMA {schema}'))
-    engine = create_engine(get_settings().database_url, connect_args={'options': f'-csearch_path={schema}'})
+    connect_args = {'options': f'-csearch_path={schema}'}
+    sync_engine = create_engine(get_settings().database_url, connect_args=connect_args)
+    async_engine = create_async_engine(
+        get_settings().database_url, connect_args=connect_args, poolclass=NullPool,
+    )
+    engine = DatabasePair(sync_engine, async_engine)
     try:
         migrate(engine, getattr(request, 'param', 'head'))
         monkeypatch.setattr(retention, 'engine', engine)
@@ -55,7 +94,8 @@ def database(monkeypatch, request):
             active_session_idle_days=30))
         yield engine
     finally:
-        engine.dispose()
+        asyncio.run(async_engine.dispose())
+        sync_engine.dispose()
         with admin.begin() as connection:
             connection.execute(text(f'DROP SCHEMA {schema} CASCADE'))
         admin.dispose()
@@ -144,18 +184,18 @@ def test_retention_dry_run_and_apply(database):
         expired = create_session(connection, days=31)
         idle = create_session(connection, idle_days=31)
     expected = {'abandoned': 1, 'histories_purged': 1, 'sessions_deleted': 1}
-    assert retention.cleanup() == expected
+    assert asyncio.run(retention.cleanup()) == expected
     with database.connect() as connection:
         assert connection.execute(text('SELECT count(*) FROM game_sessions')).scalar() == 4
         assert connection.execute(text('SELECT count(*) FROM session_messages')).scalar() == 8
-    assert retention.cleanup(apply=True) == expected
+    assert asyncio.run(retention.cleanup(apply=True)) == expected
     with database.connect() as connection:
         assert connection.execute(text('SELECT count(*) FROM game_sessions WHERE id = :id'), {'id': expired}).scalar() == 0
         for session_id in (active, idle):
             assert connection.execute(text('SELECT count(*) FROM session_messages WHERE session_id = :id'), {'id': session_id}).scalar() == 2
         row = connection.execute(text('SELECT custom_context, memory_summary, history_purged_at FROM game_sessions WHERE id = :id'), {'id': old}).one()
         assert row[0] == row[1] == {} and row[2] is not None
-    assert retention.cleanup(apply=True) == {'abandoned': 0, 'histories_purged': 0, 'sessions_deleted': 0}
+    assert asyncio.run(retention.cleanup(apply=True)) == {'abandoned': 0, 'histories_purged': 0, 'sessions_deleted': 0}
 
 
 def test_duplicate_message_rejected(database):
@@ -202,10 +242,12 @@ def test_game_custom_session_websocket_round_trip(database, monkeypatch):
         socket.send_json({'type': 'player.message', 'idempotency_key': str(uuid4()), 'content': 'Давайте обсудим сроки.'})
         assert socket.receive_json()['type'] == 'message.accepted'
         opponent = socket.receive_json()
+        while opponent['type'] == 'opponent.delta':
+            opponent = socket.receive_json()
         assert opponent['type'] == 'opponent.message', opponent
         assert opponent['emotion'] == 'warm', opponent
         state = socket.receive_json()
-        assert state['type'] == 'state.update' and state['state']['progress'] == 12
+        assert state['type'] == 'state.update' and state['state']['progress'] == 0
     messages = client.get(f'/api/v1/sessions/{session_id}/messages', headers=headers)
     assert messages.status_code == 200
     assert [message['role'] for message in messages.json()['messages']] == ['user', 'assistant']
@@ -214,7 +256,7 @@ def test_game_custom_session_websocket_round_trip(database, monkeypatch):
     assert 'evaluation' not in messages.json()['messages'][1]
     finished = client.post(f'/api/v1/sessions/{session_id}/finish', headers=headers)
     assert finished.status_code == 200 and finished.json()['status'] == 'completed'
-    assert finished.json()['final_result']['result'] == 'failure'
+    assert finished.json()['final_result']['result'] == 'finished'
 
 
 def test_opponent_failure_does_not_apply_partial_turn(database, monkeypatch):
@@ -300,7 +342,7 @@ def test_memory_survives_service_reload(database, monkeypatch):
     ))
     assert turn['events'][1]['type'] == 'opponent.message'
     reloaded = game_service.GameService(provider=MockLLMProvider(demo_evaluation=True))
-    saved = reloaded._get_session(session_id=session_id, user_id=user_id)
+    saved = asyncio.run(reloaded._get_session(session_id=session_id, user_id=user_id))
     assert saved['memory_summary']['agreements'][0]['text'] == (
         'Договорились проверить сборку утром?'
     )
@@ -419,7 +461,7 @@ def test_story_unlock_requires_success_and_manual_finish_does_not_unlock(databas
                 INSERT INTO missions(storyline_id, character_id, mission_type, interaction_type,
                                      branch_key, order_index, title, task, status)
                 VALUES (:storyline, :character, 'story', 'ai_dialogue', 'main', :order,
-                        :title, 'Discuss deadline', 'published') RETURNING id
+                        :title, 'Согласовать срок на пятницу', 'published') RETURNING id
             '''), {'storyline': storyline_id, 'character': character_id,
                    'order': order, 'title': f'Mission {order}'}).scalar_one())
     token = create_access_token(user_id)
@@ -443,12 +485,23 @@ def test_story_unlock_requires_success_and_manual_finish_does_not_unlock(databas
     assert finished.json()['final_result']['result'] == 'failure'
     assert request(mission_ids[1]).status_code == 403
     second_attempt = request(mission_ids[0])
-    service = game_service.GameService(provider=MockLLMProvider(demo_evaluation=True))
-    for _ in range(9):
-        turn = asyncio.run(service.process_player_message(
-            session_id=second_attempt.json()['id'], user_id=user_id,
-            content='Давайте обсудим, как можем найти решение.', idempotency_key=uuid4(),
-        ))
+    player_message = 'Давайте согласуем срок на пятницу.'
+    opponent_message = 'Да, согласна на пятницу.'
+    service = game_service.GameService(provider=MockLLMProvider(
+        demo_evaluation=True,
+        structured_response={
+            'status': 'achieved', 'progress': 100, 'reason': 'Срок согласован.',
+            'evidence': [
+                {'speaker': 'player', 'quote': player_message},
+                {'speaker': 'opponent', 'quote': opponent_message},
+            ],
+        },
+    ))
+    turn = asyncio.run(service.process_player_message(
+        session_id=second_attempt.json()['id'], user_id=user_id,
+        content=player_message, idempotency_key=uuid4(),
+        response_override=opponent_message,
+    ))
     assert turn['events'][-1]['final_result']['result'] == 'success'
     progress = client.get(progress_url, headers=headers).json()['missions']
     assert [(item['unlocked'], item['completed']) for item in progress] == [
@@ -461,7 +514,7 @@ def test_story_unlock_requires_success_and_manual_finish_does_not_unlock(databas
                                      completed_at=now() - interval '31 days'
             WHERE id=:id
         '''), {'id': second_attempt.json()['id']})
-    retention.cleanup(apply=True)
+    asyncio.run(retention.cleanup(apply=True))
     assert client.get(progress_url, headers=headers).json()['missions'][1]['unlocked'] is True
     stats = client.get('/api/v1/users/me/stats', headers=headers)
     assert stats.status_code == 200 and stats.json()['story_successes'] == 1

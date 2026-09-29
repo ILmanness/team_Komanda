@@ -84,7 +84,7 @@ export type GameSession = {
   character_name?: string | null;
   character_slug?: string | null;
   custom_context: CustomSessionSettings | null;
-  state: { turn?: number; contact?: number; tension?: number; progress?: number; score?: number; node_id?: string };
+  state: { turn?: number; contact?: number; tension?: number; progress?: number; score?: number; node_id?: string; goal_state?: { status: 'unresolved' | 'advancing' | 'achieved' | 'blocked'; review_available?: boolean } };
   final_result: { result?: string; reason?: string; score?: number } | null;
   ai_mode: 'mock' | 'compatible';
 };

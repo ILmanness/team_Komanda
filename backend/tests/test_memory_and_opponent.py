@@ -1,5 +1,6 @@
 import json
 
+from app.game.context_builder import ContextBuilder
 from app.game.memory import TurnMemory
 from app.game.service import GameService
 
@@ -38,6 +39,36 @@ def test_memory_does_not_turn_one_sided_proposal_into_agreement():
         ]}}, sequence_number=2,
     )
     assert state['memory']['agreements'] == []
+
+
+def test_older_dialogue_remains_in_prompt_after_six_exchanges():
+    messages = [
+        {'role': 'user' if index % 2 == 0 else 'assistant',
+         'content': f'Реплика {index}: обсуждаем срок {index}.'}
+        for index in range(16)
+    ]
+    context = ContextBuilder().build(
+        session={}, mission={}, character={}, paei_profile={},
+        difficulty_profile={}, rules={}, messages=messages,
+    )
+    older = messages[:-len(context['history'])]
+    memory = TurnMemory.for_prompt({}, older)
+    assert context['history'][0]['content'].startswith('Реплика 4:')
+    assert [entry['text'] for entry in memory['earlier_dialogue']] == [
+        row['content'] for row in messages[:4]
+    ]
+    assert memory['earlier_dialogue'][0]['speaker'] == 'player'
+    assert memory['earlier_dialogue'][1]['speaker'] == 'opponent'
+    assert 'Реплика 4:' not in json.dumps(memory, ensure_ascii=False)
+
+
+def test_older_dialogue_is_bounded_and_keeps_recent_entries():
+    messages = [{'role': 'user', 'content': f'{index}: ' + 'А' * 600}
+                for index in range(100)]
+    memory = TurnMemory.for_prompt({}, messages)
+    assert len(json.dumps(memory, ensure_ascii=False)) <= TurnMemory.MAX_DIALOGUE_CHARS
+    assert memory['earlier_dialogue'][-1]['text'].startswith('99: ')
+    assert '0: ' not in [entry['text'][:3] for entry in memory['earlier_dialogue']]
 
 
 def test_opponent_prompt_separates_profile_state_and_player_data():
@@ -94,8 +125,12 @@ def test_local_opponent_reply_stays_in_character_for_nonsense_and_insult():
     attack = {'schema_version': 'ai10-v1', 'intent': 'refusal',
               'observations': {'features': [{'code': 'personal_attack'}]},
               'proposed_event': {'critical_flags': ['PERSONAL_ATTACK']}}
-    assert GameService._needs_local_opponent_reply(neutral)
-    assert GameService._needs_local_opponent_reply(attack)
+    assert GameService._needs_local_opponent_reply(neutral, 'бууббууб')
+    assert GameService._needs_local_opponent_reply(attack, 'ты балбес')
+    assert not GameService._needs_local_opponent_reply(
+        neutral,
+        'Я предлагаю перенести запуск на три дня, чтобы проверить оплату.',
+    )
     for evaluation in (neutral, attack):
         reply = GameService._fallback_opponent_response(evaluation)
         assert reply.startswith(('Я ', 'Мне '))

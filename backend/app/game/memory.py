@@ -1,5 +1,6 @@
 """Small, evidence-backed ledger kept separately from recent chat messages."""
 
+import json
 from copy import deepcopy
 from typing import Any
 
@@ -8,6 +9,63 @@ class TurnMemory:
     """Record quoted claims and mutually confirmed agreements after a full turn."""
 
     MAX_ITEMS = 20
+    MAX_DIALOGUE_CHARS = 14_000
+    MAX_EXCERPT_CHARS = 360
+
+    @classmethod
+    def for_prompt(
+        cls,
+        summary: dict[str, Any] | None,
+        older_messages: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Keep older dialogue available after it leaves the short history window."""
+        source = summary if isinstance(summary, dict) else {}
+        facts = cls._items(source.get('revealed_facts'))
+        agreements = cls._items(source.get('agreements'))
+        result: dict[str, Any] = {
+            'revealed_facts': facts,
+            'agreements': agreements,
+            'earlier_dialogue': [],
+        }
+        if isinstance(source.get('goal_state'), dict):
+            result['goal_state'] = deepcopy(source['goal_state'])
+        # Reserve space for dialogue while retaining the most recent structured facts.
+        while cls._length(result) > 6_000:
+            if len(facts) >= len(agreements) and facts:
+                facts.pop(0)
+            elif agreements:
+                agreements.pop(0)
+            else:
+                break
+
+        for row in reversed(older_messages):
+            role = row.get('role')
+            content = row.get('content')
+            if role not in ('user', 'assistant') or not isinstance(content, str):
+                continue
+            excerpt = cls._excerpt(content)
+            if not excerpt:
+                continue
+            entry = {
+                'speaker': 'player' if role == 'user' else 'opponent',
+                'text': excerpt,
+            }
+            proposed = [entry, *result['earlier_dialogue']]
+            if cls._length({**result, 'earlier_dialogue': proposed}) > cls.MAX_DIALOGUE_CHARS:
+                break
+            result['earlier_dialogue'] = proposed
+        return result
+
+    @classmethod
+    def _excerpt(cls, content: str) -> str:
+        text = content.strip()
+        if len(text) <= cls.MAX_EXCERPT_CHARS:
+            return text
+        return text[:240].rstrip() + ' … ' + text[-110:].lstrip()
+
+    @staticmethod
+    def _length(value: dict[str, Any]) -> int:
+        return len(json.dumps(value, ensure_ascii=False, default=str))
 
     @classmethod
     def update(

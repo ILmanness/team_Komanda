@@ -92,11 +92,10 @@ class GameEngine:
         if result.intent == 'unknown' and not result.observations.features:
             contact = tension = progress = quality = critical = 0
         new_state = deepcopy(state)
-        for key, change in (
-            ('contact', contact),
-            ('tension', tension),
-            ('progress', progress),
-        ):
+        changes = [('contact', contact), ('tension', tension)]
+        if not self._has_goal(state):
+            changes.append(('progress', progress))
+        for key, change in changes:
             new_state[key] = self._bounded_update(new_state.get(key, 0), change)
         new_state['negotiation_quality'] = self._bounded_update(
             new_state.get('negotiation_quality', 50), quality,
@@ -132,12 +131,8 @@ class GameEngine:
         critical_errors = self._to_int(
             state.get("critical_errors", 0)
         )
-
-        if progress >= 100:
-            return {
-                "finished": True,
-                "reason": "success",
-            }
+        goal_state = state.get('goal_state')
+        has_goal = self._has_goal(state)
 
         if critical_errors >= 3:
             return {
@@ -145,10 +140,25 @@ class GameEngine:
                 "reason": "critical_errors",
             }
 
+        if has_goal and goal_state.get('review_available') and goal_state.get('status') == 'achieved':
+            return {
+                "finished": True,
+                "reason": "goal_achieved",
+            }
+
+        if not has_goal and progress >= 100:
+            return {
+                "finished": True,
+                "reason": "success",
+            }
+
         if turn >= max_turns:
             return {
                 "finished": True,
-                "reason": "max_turns",
+                "reason": (
+                    "goal_unverified" if has_goal and not goal_state.get('review_available')
+                    else "max_turns"
+                ),
             }
 
         return {
@@ -171,16 +181,14 @@ class GameEngine:
             state.get("critical_errors", 0)
         )
 
-        if reason == "success":
+        if reason in ("success", "goal_achieved"):
             result = "success"
         elif reason == "critical_errors":
             result = "failure"
+        elif reason == "goal_unverified":
+            result = "finished"
         elif reason == "max_turns":
-            result = (
-                "success"
-                if progress >= 50
-                else "failure"
-            )
+            result = "failure" if self._has_goal(state) or progress < 50 else "success"
         else:
             result = "finished"
 
@@ -198,7 +206,20 @@ class GameEngine:
             "turns": self._to_int(
                 state.get("turn", 0)
             ),
+            "goal_status": (
+                state['goal_state'].get('status')
+                if isinstance(state.get('goal_state'), dict) else None
+            ),
         }
+
+    @staticmethod
+    def _has_goal(state: dict[str, Any]) -> bool:
+        goal_state = state.get('goal_state')
+        return (
+            isinstance(goal_state, dict)
+            and isinstance(goal_state.get('goal'), str)
+            and bool(goal_state['goal'].strip())
+        )
 
     @classmethod
     def _bounded_update(

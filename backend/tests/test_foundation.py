@@ -48,6 +48,10 @@ def test_mock_story_can_succeed_but_short_answers_do_not(monkeypatch):
         state = engine.apply_evaluation(state=state, evaluation=score)
     assert engine.check_end_conditions(state=state)['reason'] == 'success'
     assert engine.build_final_result(state=state, reason='success')['result'] == 'success'
+    state['critical_errors'] = 3
+    assert engine.check_end_conditions(state=state)['reason'] == 'critical_errors'
+    assert engine.build_final_result(state={'turn': 11, 'progress': 40},
+                                     reason='user_farewell')['result'] == 'finished'
     weak = asyncio.run(evaluator.evaluate(context={}, player_message='ок'))
     assert weak['proposed_event']['action_type'] == 'neutral'
     assert engine.apply_evaluation(state={'progress': 0}, evaluation=weak)['progress'] == 0
