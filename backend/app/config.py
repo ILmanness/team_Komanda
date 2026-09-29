@@ -1,9 +1,9 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import URL
+from sqlalchemy import URL, make_url
 
 
 class Settings(BaseSettings):
@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     hesh_alg: str = 'HS256'
     access_token_expire_minutes: int = 480
     auth_secret_key: str
+    database_url_value: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices('DATABASE_URL', 'POSTGRES_URL'),
+    )
     postgres_host: str = 'localhost'
     postgres_port: int = 5432
     postgres_db: str = 'arena'
@@ -37,6 +41,11 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> URL:
+        if self.database_url_value:
+            url = make_url(self.database_url_value)
+            if url.get_backend_name() not in ('postgres', 'postgresql'):
+                raise ValueError('DATABASE_URL must point to PostgreSQL')
+            return url.set(drivername='postgresql+psycopg')
         return URL.create('postgresql+psycopg', username=self.postgres_user,
                           password=self.postgres_password, host=self.postgres_host,
                           port=self.postgres_port, database=self.postgres_db)

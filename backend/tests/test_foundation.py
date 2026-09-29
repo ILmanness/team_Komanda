@@ -31,6 +31,14 @@ def test_database_password_is_not_url_interpolated():
     assert settings.database_url.password == 'a@b:/%c'
 
 
+def test_database_url_from_cloud_provider_uses_psycopg_driver(monkeypatch):
+    monkeypatch.setenv('DATABASE_URL', 'postgresql://cloud-user:secret@db.example/arena?sslmode=require')
+    settings = Settings(_env_file=None)
+    assert settings.database_url.drivername == 'postgresql+psycopg'
+    assert settings.database_url.host == 'db.example'
+    assert settings.database_url.query['sslmode'] == 'require'
+
+
 def test_mock_ai(monkeypatch):
     monkeypatch.setattr(ai, 'get_settings', lambda: Settings(_env_file=None, ai_provider='mock'))
     assert '[MOCK]' in asyncio.run(ai.complete([{'role': 'user', 'content': 'hello'}]))

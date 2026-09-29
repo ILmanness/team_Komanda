@@ -5,7 +5,8 @@
       "root": "backend",
       "framework": "fastapi",
       "runtime": "python",
-      "entrypoint": "app.main:app"
+      "entrypoint": "app.main:app",
+      "buildCommand": "uv run alembic upgrade head && uv run python -m app.admin.import_editorial --apply && uv run python -m app.admin.seed_demo --apply && if [ -n \"$ADMIN_BOOTSTRAP_PASSWORD\" ]; then uv run python -m app.admin.bootstrap --login admin --email admin@admin.ru --display-name admin --if-missing; fi"
     },
     "frontend": {
       "root": "frontend",
