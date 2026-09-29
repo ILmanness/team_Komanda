@@ -745,6 +745,9 @@ def test_admin_can_edit_branching_training_and_player_can_finish_it(database, mo
     })
     assert session.status_code == 201, session.text
     session_id = session.json()['id']
+    opened = client.post(f'/api/v1/sessions/{session_id}/branching/aid', headers=player_headers,
+                         json={'kind': 'intro'})
+    assert opened.status_code == 200, opened.text
     for _ in range(10):
         view = client.get(f'/api/v1/sessions/{session_id}/branching', headers=player_headers).json()
         if view['status'] != 'active':
@@ -752,7 +755,8 @@ def test_admin_can_edit_branching_training_and_player_can_finish_it(database, mo
         answer = view['choices'][0]
         response = client.post(f'/api/v1/sessions/{session_id}/branching/choice',
                                headers=player_headers,
-                               json={'node_id': view['node']['node_id'], 'option_id': answer['id']})
+                               json={'node_id': view['node']['node_id'], 'option_id': answer['id'],
+                                     'event_id': str(uuid4())})
         assert response.status_code == 200, response.text
     assert view['status'] != 'active'
 
@@ -925,12 +929,29 @@ def test_bundled_branching_catalog_and_complete_scenario(database, monkeypatch):
     first = client.post('/api/v1/sessions', json={'mode': 'method_training', 'mission_id': str(mission)}, headers=headers)
     assert first.status_code == 201, first.text
     first_id = first.json()['id']
-    second = client.post('/api/v1/sessions', json={'mode': 'method_training', 'mission_id': str(mission)}, headers=headers)
+    second = client.post('/api/v1/sessions', json={'mode': 'method_training', 'mission_id': str(mission),
+                                                    'training_mode': 'practice'}, headers=headers)
     assert second.status_code == 201, second.text
     base = f'/api/v1/sessions/{first_id}/branching'
     view = client.get(base, headers=headers).json()
     other = client.get(f"/api/v1/sessions/{second.json()['id']}/branching", headers=headers).json()
     assert view['scenario_id'] != other['scenario_id']
+    assert other['mode'] == 'practice'
+    assert other['node']['skill_step'] is None and other['node']['hint'] is None
+    practice_base = f"/api/v1/sessions/{second.json()['id']}/branching"
+    assert client.post(f'{practice_base}/aid', json={'kind': 'intro'}, headers=headers).status_code == 200
+    shown = client.post(f'{practice_base}/aid', json={'kind': 'hint',
+                          'node_id': other['node']['node_id']}, headers=headers)
+    assert shown.status_code == 200 and shown.json()['node']['hint']
+    practice_event_id = str(uuid4())
+    practice_choice = {'node_id': other['node']['node_id'], 'option_id': other['choices'][0]['id'],
+                       'event_id': practice_event_id}
+    practice_result = client.post(f'{practice_base}/choice', json=practice_choice, headers=headers)
+    assert practice_result.status_code == 200
+    assert practice_result.json()['hint_used']
+    assert 'feedback' not in practice_result.json()['events'][-1]
+    assert client.post(f'{practice_base}/choice', json=practice_choice,
+                       headers=headers).json()['events'] == practice_result.json()['events']
     assert view['tool_title'] == 'Гарвардский метод'
     assert len(view['choices']) >= 2
 
@@ -942,22 +963,27 @@ def test_bundled_branching_catalog_and_complete_scenario(database, monkeypatch):
         node_id, choices = queue.pop(0)
         node = scenario['nodes'][node_id]
         if node['type'] == 'terminal':
-            if node['outcome'] == 'success':
+            if scenario['outcomes'][node['outcome_id']]['status'] == 'completed':
                 path = choices
                 break
             continue
         queue.extend((option['next_node'], [*choices, (node_id, option['id'])]) for option in node['options'])
     assert path
+    aid = client.post(f'{base}/aid', json={'kind': 'intro'}, headers=headers)
+    assert aid.status_code == 200, aid.text
     for node_id, option_id in path:
-        response = client.post(f'{base}/choice', json={'node_id': node_id, 'option_id': option_id}, headers=headers)
+        event_id = str(uuid4())
+        response = client.post(f'{base}/choice', json={'node_id': node_id, 'option_id': option_id,
+                                                       'event_id': event_id}, headers=headers)
         assert response.status_code == 200, response.text
         view = response.json()
         assert 'flag' not in view['events'][-1]
         if view['status'] == 'active':
-            assert 'feedback' not in view['events'][-1]
+            assert view['events'][-1]['feedback']
     assert view['status'] == 'completed'
-    assert view['final_result']['result'] == 'success'
+    assert view['final_result']['result'] == 'completed'
     assert all(event['feedback'] for event in view['events'])
-    repeated = client.post(f'{base}/choice', json={'node_id': path[-1][0], 'option_id': path[-1][1]}, headers=headers)
+    repeated = client.post(f'{base}/choice', json={'node_id': path[-1][0], 'option_id': path[-1][1],
+                                                    'event_id': event_id}, headers=headers)
     assert repeated.status_code == 200
     assert len(repeated.json()['events']) == len(path)

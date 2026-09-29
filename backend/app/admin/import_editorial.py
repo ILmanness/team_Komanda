@@ -39,8 +39,10 @@ def load_data():
 
 
 def validate_branching(data):
-    if data['version'] != '2.0' or len(data['tools']) != 17:
+    if data['version'] not in ('2.0', '3.0') or len(data['tools']) != 17:
         raise ValueError('Incomplete branching training catalog')
+    if data['version'] == '3.0':
+        return validate_branching_v3(data)
     seen_tools, seen_scenarios = set(), set()
     for category, expected in (('methods', 9), ('principles', 8)):
         group = [tool for tool in data['tools'] if tool['category'] == category]
@@ -81,6 +83,68 @@ def validate_branching(data):
                 seen.add(node_id)
 
             walk(scenario['start_node_id'])
+            if seen != set(nodes):
+                raise ValueError(f'{scenario_id}: unreachable nodes')
+
+
+def validate_branching_v3(data, strict_catalog=True):
+    seen_tools, seen_scenarios = set(), set()
+    if strict_catalog:
+        for category, expected in (('methods', 9), ('principles', 8)):
+            group = [tool for tool in data['tools'] if tool['category'] == category]
+            if len(group) != expected or [tool['order'] for tool in group] != list(range(1, expected + 1)):
+                raise ValueError(f'{category}: incomplete or unordered catalog')
+    for tool in data['tools']:
+        if tool['id'] in seen_tools or not (len(tool['scenarios']) == 2 if strict_catalog else 1 <= len(tool['scenarios']) <= 20):
+            raise ValueError(f"{tool['id']}: duplicate tool or missing scenario")
+        seen_tools.add(tool['id'])
+        if any(not tool['card'].get(key) for key in (
+                'essence', 'when_to_apply', 'steps', 'typical_error', 'example', 'limit')):
+            raise ValueError(f"{tool['id']}: incomplete method card")
+        for scenario in tool['scenarios']:
+            scenario_id = scenario['id']
+            if scenario_id in seen_scenarios or scenario['weight'] <= 0:
+                raise ValueError(f'{scenario_id}: duplicate scenario or invalid weight')
+            seen_scenarios.add(scenario_id)
+            nodes, outcomes = scenario['nodes'], scenario['outcomes']
+            if scenario['start_node_id'] not in nodes or not outcomes:
+                raise ValueError(f'{scenario_id}: missing start or outcomes')
+            decisions = [key for key, node in nodes.items() if node['type'] == 'decision']
+            if scenario['step_order'] != decisions or scenario['clean_steps'] != len(decisions):
+                raise ValueError(f'{scenario_id}: inconsistent steps')
+            seen, visiting, option_ids = set(), set(), {}
+            def walk(node_id, flags):
+                if node_id in visiting:
+                    raise ValueError(f'{scenario_id}: cycle at {node_id}')
+                node = nodes[node_id]
+                required = node['required_flags']
+                if required and required not in flags:
+                    raise ValueError(f'{scenario_id}/{node_id}: required flag is missing on a route')
+                seen.add(node_id)
+                visiting.add(node_id)
+                if node['type'] == 'terminal':
+                    if node['options'] or node['outcome_id'] not in outcomes:
+                        raise ValueError(f'{scenario_id}/{node_id}: invalid terminal')
+                elif node['type'] not in ('decision', 'recovery') or len(node['options']) < 2:
+                    raise ValueError(f'{scenario_id}/{node_id}: invalid choices')
+                for option in node['options']:
+                    if option_ids.get(option['id'], node_id) != node_id or option['next_node'] not in nodes:
+                        raise ValueError(f'{scenario_id}/{node_id}: invalid option or target')
+                    option_ids[option['id']] = node_id
+                    if not option['flag'] or not option['debrief']['explanation'] or not option['debrief']['improvement']:
+                        raise ValueError(f'{scenario_id}/{node_id}: incomplete debrief')
+                    changes = option['state_changes']
+                    if set(changes) - {'add_flags', 'step_results', 'error_count_delta',
+                                       'correction_count_delta', 'append_consequence', 'finished'}:
+                        raise ValueError(f'{scenario_id}/{node_id}: unsupported state change')
+                    if any(value not in ('independent', 'corrected', 'not_yet_applied')
+                           for value in changes.get('step_results', {}).values()):
+                        raise ValueError(f'{scenario_id}/{node_id}: invalid step result')
+                    next_flags = flags | set(changes.get('add_flags', []))
+                    walk(option['next_node'], next_flags)
+                visiting.remove(node_id)
+            # Shared nodes are revisited on different routes, so check every route.
+            walk(scenario['start_node_id'], set())
             if seen != set(nodes):
                 raise ValueError(f'{scenario_id}: unreachable nodes')
 

@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -164,6 +164,29 @@ class BranchingToolWrite(BaseModel):
         return self
 
 
+class BranchingToolV3Write(BaseModel):
+    version: Literal['3.0']
+    id: str = Field(min_length=1, max_length=100)
+    category: Literal['methods', 'principles']
+    title: str = Field(min_length=2, max_length=200)
+    description: str = Field(min_length=5, max_length=5000)
+    order: int = Field(ge=1, le=32767)
+    card: dict[str, str]
+    scenarios: list[dict[str, Any]] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode='after')
+    def valid_catalog(self):
+        from app.admin.import_editorial import validate_branching_v3
+
+        if not any(scenario.get('status') == 'active' for scenario in self.scenarios):
+            raise ValueError('Нужен хотя бы один активный сценарий')
+        try:
+            validate_branching_v3({'tools': [self.model_dump()]}, strict_catalog=False)
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise ValueError('Неполный сценарий версии 3.0') from exc
+        return self
+
+
 class MissionWrite(BaseModel):
     mission_type: Literal['story', 'method_training']
     interaction_type: Literal['ai_dialogue', 'single_choice', 'guided_training', 'branching_training'] = 'ai_dialogue'
@@ -181,7 +204,7 @@ class MissionWrite(BaseModel):
     choices: list[TrainingChoice] = Field(default_factory=list, max_length=12)
     hints: list[str] = Field(default_factory=list, max_length=5)
     guided: GuidedAuthoringWrite | None = None
-    branching: BranchingToolWrite | None = None
+    branching: BranchingToolV3Write | BranchingToolWrite | None = None
 
     @model_validator(mode='after')
     def validate_mode(self):

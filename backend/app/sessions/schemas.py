@@ -21,6 +21,8 @@ class CreateSessionRequest(BaseModel):
 
     custom_context: dict[str, Any] | None = None
 
+    training_mode: Literal['learning', 'practice'] | None = None
+
 
 class CreateSessionResponse(BaseModel):
     id: UUID

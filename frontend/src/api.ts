@@ -156,15 +156,21 @@ export type GuidedTraining = {
 
 export type BranchingEvent = {
   sequence_no: number; node_id: string; option_id: string; choice_text: string;
-  effect: string | null; feedback?: string;
+  effect: string | null; feedback?: string; result_type?: string;
+  debrief?: { step: string; choice: string; explanation: string; improvement: string; type: string };
 };
 export type BranchingTraining = {
+  content_version?: '3.0'; mode?: 'learning' | 'practice';
   session_id: string; mission_id: string; status: GameSession['status']; tool_id: string; tool_title: string;
   tool_description: string; category: 'methods' | 'principles';
   scenario_id: string; scenario_title: string; goal: string;
-  node: { node_id: string; type: 'decision' | 'consequence' | 'terminal'; speaker: string; text: string; outcome: string | null };
+  level?: string; card_seen?: boolean;
+  card?: { essence: string; when_to_apply: string; steps: string; typical_error: string; example: string; limit: string };
+  node: { node_id: string; type: 'decision' | 'recovery' | 'consequence' | 'terminal'; speaker: string; text: string; outcome: string | null; skill_step?: string | null; hint?: string | null };
   choices: { id: string; text: string }[]; events: BranchingEvent[];
-  final_result: { result?: string; scenario_id?: string; tool_id?: string } | null;
+  step_results?: Record<string, string>; consequences?: string[]; error_count?: number; correction_count?: number; hint_used?: boolean;
+  final_result: { result?: string; scenario_id?: string; tool_id?: string; outcome_text?: string; application?: string;
+    consequences?: string[]; step_results?: Record<string, string>; repeat?: string; hint_used?: boolean } | null;
 };
 
 export type AdminStoryline = Storyline & { status: string };
@@ -202,6 +208,7 @@ export type AdminMissionWrite = {
 export type CreateSessionRequest = {
   mode: SessionMode;
   mission_id?: string;
+  training_mode?: 'learning' | 'practice';
   paei_profile_id?: string;
   difficulty_profile_id?: string;
   character_id?: string;
@@ -283,8 +290,11 @@ export const api = {
   branching: (token: string, id: string, signal?: AbortSignal) => request<BranchingTraining>(`/v1/sessions/${encodeURIComponent(id)}/branching`, {
     signal, headers: { Authorization: `Bearer ${token}` },
   }),
-  branchingChoice: (token: string, id: string, node_id: string, option_id: string) => request<BranchingTraining>(`/v1/sessions/${encodeURIComponent(id)}/branching/choice`, {
-    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ node_id, option_id }),
+  branchingChoice: (token: string, id: string, node_id: string, option_id: string, event_id?: string) => request<BranchingTraining>(`/v1/sessions/${encodeURIComponent(id)}/branching/choice`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ node_id, option_id, event_id }),
+  }),
+  branchingAid: (token: string, id: string, kind: 'intro' | 'card' | 'hint', node_id?: string) => request<BranchingTraining>(`/v1/sessions/${encodeURIComponent(id)}/branching/aid`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ kind, node_id }),
   }),
   me: (token: string) => request<User>('/v1/users/me', { headers: { Authorization: `Bearer ${token}` } }),
   accountStats: (token: string, signal?: AbortSignal) => request<AccountStats>('/v1/users/me/stats', {

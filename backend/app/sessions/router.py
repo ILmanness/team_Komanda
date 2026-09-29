@@ -24,6 +24,7 @@ from .schemas import (
     SessionMessagesResponse,
     SessionResponse,
 )
+from .branching_v3 import initial_state as branching_v3_initial_state
 
 router = APIRouter(
     prefix="/api/v1/sessions",
@@ -329,8 +330,10 @@ async def create_session(
             alternatives = [item for item in available if item['id'] != previous]
             pool = alternatives or available
             scenario = random.choices(pool, weights=[item['weight'] for item in pool], k=1)[0]
-            initial_state = {'turn': 0, 'scenario_id': scenario['id'],
-                             'node_id': scenario['start_node_id'], 'events': []}
+            initial_state = (branching_v3_initial_state(scenario, data.training_mode or 'learning')
+                             if tool.get('version') == '3.0' else
+                             {'turn': 0, 'scenario_id': scenario['id'],
+                              'node_id': scenario['start_node_id'], 'events': []})
         elif data.mode == 'custom' or (mission is not None and mission['interaction_type'] == 'ai_dialogue'):
             scenario_goal = (
                 data.custom_context.get('goal')

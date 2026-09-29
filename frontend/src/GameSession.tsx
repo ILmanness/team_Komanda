@@ -18,6 +18,7 @@ export function MissionSetup({ mode }: { mode: 'story' | 'method_training' }) {
   const [briefing, setBriefing] = useState<MissionBriefing | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
+  const [trainingMode, setTrainingMode] = useState<'learning' | 'practice'>('learning');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -38,7 +39,8 @@ export function MissionSetup({ mode }: { mode: 'story' | 'method_training' }) {
     try {
       const guided = briefing?.interaction_type === 'guided_training';
       const branching = briefing?.interaction_type === 'branching_training';
-      const created = await api.createSession(token, { mode, mission_id: id });
+      const created = await api.createSession(token, { mode, mission_id: id,
+        ...(branching ? { training_mode: trainingMode } : {}) });
       navigate(branching ? `/training/branching/${created.id}` : guided ? `/training/guided/${created.id}` : `/session/${created.id}`);
     } catch (cause) { setError(errorText(cause)); }
     finally { setPending(false); }
@@ -46,14 +48,20 @@ export function MissionSetup({ mode }: { mode: 'story' | 'method_training' }) {
 
   const back = mode === 'story' ? '/story' : '/training';
   if (!briefing) return <section className="section-wrap content-section custom-loading"><Link className="back-link" to={back}>← Назад</Link><div className="notice" role="status">{error || 'Загружаем сценарий…'}</div></section>;
-  const guided = briefing.interaction_type === 'guided_training' || briefing.interaction_type === 'branching_training';
+  const branching = briefing.interaction_type === 'branching_training';
+  const guided = briefing.interaction_type === 'guided_training' || branching;
   const ready = briefing.character !== null && (mode === 'story' || guided || briefing.interaction_type === 'single_choice');
   return <div className="section-wrap custom-page mission-setup">
     <Link className="back-link" to={back}>← Назад</Link>
     <div className="custom-page-heading"><span className="eyebrow">{mode === 'story' ? 'Сюжетная сцена' : 'Тренировка'}</span><h1>{briefing.title}</h1><p>{briefing.task}</p></div>
     <div className="mission-setup-layout"><aside className="mission-character"><img src={mode === 'story' ? '/images/office-story-scene.png' : '/images/office-training-scene.png'} alt="Персонажи в офисе" /><div><span className="eyebrow">{guided ? 'Формат' : 'Собеседник'}</span><h2>{guided ? 'Несколько решений' : briefing.character?.name || 'Пока не назначен'}</h2>{guided ? <p>Разберите рабочие эпизоды, посмотрите реакцию собеседника и объяснения наставника.</p> : <><p>{briefing.character?.role_title}</p><p>{briefing.character?.description}</p></>}</div></aside>
       <div className="custom-form"><span className="form-section-name">{guided ? 'Как проходит тренировка' : mode === 'story' ? 'Контекст сцены' : 'Перед тренировкой'}</span>
-        {guided ? <p className="form-note">Выбирайте подготовленные ответы, читайте реакцию наставницы и проверяйте себя по критериям. Нейросеть здесь не участвует.</p> : <>
+        {guided ? <><p className="form-note">Выбирайте подготовленные ответы и смотрите, к чему они приводят. Нейросеть здесь не участвует.</p>
+          {branching && <fieldset className="training-mode-picker"><legend>Режим</legend>
+            <label><input type="radio" name="training-mode" value="learning" checked={trainingMode === 'learning'} onChange={() => setTrainingMode('learning')} /><strong>Обучение</strong><span>После выбора наставница объяснит решение.</span></label>
+            <label><input type="radio" name="training-mode" value="practice" checked={trainingMode === 'practice'} onChange={() => setTrainingMode('practice')} /><strong>Практика</strong><span>Реакцию увидите сразу, подробный разбор — в конце.</span></label>
+          </fieldset>}
+        </> : <>
           <p><strong>Что происходит:</strong> {briefing.situation || 'Подробности ситуации появятся в разговоре.'}</p>
           {briefing.public_context && <p><strong>Что уже известно:</strong> {briefing.public_context}</p>}
           <p><strong>Ваша цель:</strong> {briefing.task}</p>
