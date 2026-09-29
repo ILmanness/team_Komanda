@@ -1,3 +1,4 @@
+import random
 from typing import Annotated
 from uuid import UUID
 
@@ -287,7 +288,7 @@ async def create_session(
                     detail="Difficulty profile not found",
                 )
 
-        if data.mode == 'method_training' and mission['interaction_type'] not in ('single_choice', 'guided_training'):
+        if data.mode == 'method_training' and mission['interaction_type'] not in ('single_choice', 'guided_training', 'branching_training'):
             raise HTTPException(status_code=400, detail='Training requires authored answers')
 
         if data.mode == 'story' and character is not None and paei is None and character['paei_profile_id']:
@@ -315,6 +316,21 @@ async def create_session(
         if mission is not None and mission['interaction_type'] == 'guided_training':
             guided = (mission['config'] or {}).get('guided') or {}
             initial_state = {'turn': 0, 'node_id': guided['start_node_id'], 'events': []}
+        elif mission is not None and mission['interaction_type'] == 'branching_training':
+            tool = (mission['config'] or {}).get('branching') or {}
+            available = [item for item in tool.get('scenarios', []) if item.get('status') == 'active']
+            if not available:
+                raise HTTPException(status_code=422, detail='Training has no active scenarios')
+            previous = (await connection.execute(text('''
+                SELECT state->>'scenario_id' FROM game_sessions
+                WHERE user_id=:user_id AND mission_id=:mission_id
+                ORDER BY started_at DESC LIMIT 1
+            '''), {'user_id': user_id, 'mission_id': data.mission_id})).scalar_one_or_none()
+            alternatives = [item for item in available if item['id'] != previous]
+            pool = alternatives or available
+            scenario = random.choices(pool, weights=[item['weight'] for item in pool], k=1)[0]
+            initial_state = {'turn': 0, 'scenario_id': scenario['id'],
+                             'node_id': scenario['start_node_id'], 'events': []}
         elif data.mode == 'custom' or (mission is not None and mission['interaction_type'] == 'ai_dialogue'):
             scenario_goal = (
                 data.custom_context.get('goal')

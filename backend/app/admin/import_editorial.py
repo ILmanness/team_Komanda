@@ -28,12 +28,61 @@ def stable_id(key):
 def load_data():
     knowledge = json.loads((CONTENT / 'knowledge.json').read_text(encoding='utf-8'))
     trainings = json.loads((CONTENT / 'trainings.json').read_text(encoding='utf-8'))
+    branching = json.loads((CONTENT / 'branching_trainings.json').read_text(encoding='utf-8'))
     if knowledge['schema_version'] != 1 or trainings['schema_version'] != '2.0':
         raise ValueError('Unknown editorial content version')
     if len(knowledge['items']) != 37 or len(trainings['definitions']) != 8:
         raise ValueError('Incomplete editorial content')
     validate_trainings(trainings)
-    return knowledge, trainings
+    validate_branching(branching)
+    return knowledge, trainings, branching
+
+
+def validate_branching(data):
+    if data['version'] != '2.0' or len(data['tools']) != 17:
+        raise ValueError('Incomplete branching training catalog')
+    seen_tools, seen_scenarios = set(), set()
+    for category, expected in (('methods', 9), ('principles', 8)):
+        group = [tool for tool in data['tools'] if tool['category'] == category]
+        if len(group) != expected or [tool['order'] for tool in group] != list(range(1, expected + 1)):
+            raise ValueError(f'{category}: incomplete or unordered catalog')
+    for tool in data['tools']:
+        if tool['id'] in seen_tools or len(tool['scenarios']) != 2:
+            raise ValueError(f"{tool['id']}: duplicate tool or missing scenario")
+        seen_tools.add(tool['id'])
+        for scenario in tool['scenarios']:
+            scenario_id = scenario['id']
+            if scenario_id in seen_scenarios or scenario['weight'] <= 0:
+                raise ValueError(f'{scenario_id}: duplicate scenario or invalid weight')
+            seen_scenarios.add(scenario_id)
+            nodes = scenario['nodes']
+            if scenario['start_node_id'] not in nodes:
+                raise ValueError(f'{scenario_id}: missing start node')
+            seen, visiting = set(), set()
+
+            def walk(node_id):
+                if node_id in visiting:
+                    raise ValueError(f'{scenario_id}: cycle at {node_id}')
+                if node_id in seen:
+                    return
+                node = nodes[node_id]
+                visiting.add(node_id)
+                options = node['options']
+                if node['type'] == 'terminal':
+                    if options or node['outcome'] not in ('success', 'partial', 'fail', 'not_applied'):
+                        raise ValueError(f'{scenario_id}: invalid terminal {node_id}')
+                elif len(options) < 2 or len({option['id'] for option in options}) != len(options):
+                    raise ValueError(f'{scenario_id}: invalid choices at {node_id}')
+                for option in options:
+                    if not option['feedback'] or option['next_node'] not in nodes:
+                        raise ValueError(f'{scenario_id}: invalid transition at {node_id}')
+                    walk(option['next_node'])
+                visiting.remove(node_id)
+                seen.add(node_id)
+
+            walk(scenario['start_node_id'])
+            if seen != set(nodes):
+                raise ValueError(f'{scenario_id}: unreachable nodes')
 
 
 def validate_trainings(data):
@@ -100,7 +149,7 @@ def validate_trainings(data):
             raise ValueError(f'{training_id}: unreachable nodes: {set(nodes) - visited}')
 
 
-def apply(knowledge, trainings):
+def apply(knowledge, trainings, branching):
     counts = Counter()
     with engine.begin() as connection:
         for item in knowledge['items']:
@@ -174,6 +223,31 @@ def apply(knowledge, trainings):
             })
             counts['training'] += 1
 
+        for tool in branching['tools']:
+            topic_slug = 'topic-3' if tool['category'] == 'methods' else 'topic-2'
+            first = tool['scenarios'][0]
+            connection.execute(text("""
+                INSERT INTO missions (id, knowledge_item_id, character_id, mission_type,
+                    interaction_type, branch_key, order_index, title, task, context, config, status)
+                VALUES (:id, :knowledge_id, :character_id, 'method_training',
+                    'branching_training', :category, :sort_order, :title, :task,
+                    :context, :config, 'published')
+                ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, task=EXCLUDED.task,
+                    context=EXCLUDED.context, config=EXCLUDED.config,
+                    branch_key=EXCLUDED.branch_key, order_index=EXCLUDED.order_index,
+                    updated_at=now()
+                WHERE COALESCE(missions.config->'branching'->>'source', '') <> 'admin'
+            """), {
+                'id': stable_id(f"branching:{tool['category']}:{tool['id']}"),
+                'knowledge_id': stable_id(f'knowledge:{topic_slug}'),
+                'character_id': mentor_id, 'category': tool['category'],
+                'sort_order': tool['order'], 'title': tool['title'],
+                'task': tool['description'],
+                'context': Jsonb({'situation': first['nodes'][first['start_node_id']]['text']}),
+                'config': Jsonb({'branching': tool}),
+            })
+            counts['branching_training'] += 1
+
     return counts
 
 
@@ -181,11 +255,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true')
     args = parser.parse_args()
-    knowledge, trainings = load_data()
+    knowledge, trainings, branching = load_data()
     print(f"Validated: {len(knowledge['items'])} knowledge items, "
-          f"{len(trainings['definitions'])} trainings")
+          f"{len(trainings['definitions'])} guided trainings, "
+          f"{len(branching['tools'])} branching tools")
     if args.apply:
-        print(dict(apply(knowledge, trainings)))
+        print(dict(apply(knowledge, trainings, branching)))
     else:
         print('Dry run; pass --apply to import.')
 

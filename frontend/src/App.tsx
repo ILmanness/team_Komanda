@@ -5,6 +5,7 @@ import { AuthContext, useAuth } from './auth-context';
 import { CustomTrainingForm } from './CustomTraining';
 import { GameDialog, MissionSetup } from './GameSession';
 import GuidedTrainingPage from './GuidedTraining';
+import BranchingTrainingPage from './BranchingTraining';
 import { AdminPage } from './Admin';
 import { AccountPage } from './AccountPage';
 import { CharactersPage } from './CharactersPage';
@@ -90,7 +91,8 @@ function Shell({ children }: { children: React.ReactNode }) {
   }, []);
   useEffect(() => { window.scrollTo(0, 0); }, [location.pathname]);
   function logout() {
-    api.logout().catch(() => undefined);
+    const token = sessionStorage.getItem('arena_token');
+    if (token) api.logout(token).catch(() => undefined);
     sessionStorage.removeItem('arena_token');
     setUser(null);
   }
@@ -134,10 +136,21 @@ function PageIntro({ eyebrow, title, text, back }: { eyebrow: string; title: str
 
 function Training() {
   const missions = useResource('training', signal => api.missions('method_training', signal));
+  const categories = [
+    { key: 'methods', title: 'Методы', description: 'Приёмы ведения разговора и обратной связи.' },
+    { key: 'principles', title: 'Принципы', description: 'Подходы к решениям, приоритетам и последствиям.' },
+  ];
   return <><section className="training-banner section-wrap"><div><span className="eyebrow">Один на один</span><h1>Тренировка</h1><p>В каждой тренировке вы разговариваете с одним собеседником. Выбирайте ситуацию и пробуйте новые решения.</p></div><img src="/images/office-training-scene.png" alt="Собеседница в переговорной" /></section>
     <section className="section-wrap custom-entry"><div><span className="eyebrow">Ваш сценарий</span><h2>Разговор на ваших условиях</h2><p>Опишите ситуацию, задайте цель и характер собеседника. После этого можно сразу начать диалог.</p></div><Link className="button primary" to="/training/custom">Создать свой диалог <span>↗</span></Link></section>
-    <section className="section-wrap content-section"><div className="content-toolbar"><div><span className="eyebrow">Каталог тренировок</span><h2>Выберите сценарий</h2></div><span className="pill">{missions.data?.length ?? 0} доступно</span></div>
-      <ResourceView resource={missions} empty="Опубликованных тренировок пока нет. Как только появятся сценарии, они будут показаны здесь.">{items => <div className="list-grid">{items.map((mission: Mission) => <Link className="list-card" to={`/training/mission/${mission.id}`} key={mission.id}><div><span className="eyebrow">{mission.interaction_type === 'guided_training' ? 'Практика решений' : mission.interaction_type === 'single_choice' ? 'Выбор ответа' : 'Диалог'}</span><h3>{mission.title}</h3><p>{mission.interaction_type === 'guided_training' ? 'Несколько ситуаций, подсказки и ответ своими словами.' : 'Откройте сценарий и настройте разговор.'}</p></div><span className="round-arrow">↗</span></Link>)}</div>}</ResourceView>
+    <section className="section-wrap content-section"><div className="content-toolbar"><div><span className="eyebrow">Каталог тренировок</span><h2>Выберите инструмент</h2></div></div>
+      <ResourceView resource={missions} empty="Опубликованных тренировок пока нет. Они появятся здесь после загрузки материалов.">{items => <div className="training-catalog">{categories.map(category => {
+        const group = items.filter((mission: Mission) => mission.interaction_type === 'branching_training' && mission.branch_key === category.key)
+          .sort((a: Mission, b: Mission) => (a.order_index ?? 0) - (b.order_index ?? 0));
+        return <section className="training-group" key={category.key} aria-labelledby={`training-${category.key}`}><div className="training-group-heading"><div><span className="eyebrow">Тренировки</span><h3 id={`training-${category.key}`}>{category.title}</h3><p>{category.description}</p></div><span className="pill">{group.length}</span></div>
+          <div className="training-tool-list">{group.map((mission: Mission) => <Link className="training-tool" to={`/training/mission/${mission.id}`} key={mission.id}><strong>{mission.title}</strong><span aria-hidden="true">↗</span></Link>)}</div>
+          {group.length === 0 && <p className="training-group-empty">Пока нет доступных сценариев.</p>}
+        </section>;
+      })}</div>}</ResourceView>
     </section></>;
 }
 
@@ -196,6 +209,7 @@ export default function App() {
     <Route path="/training/custom" element={<CustomTrainingForm />} />
     <Route path="/training/mission/:id" element={<MissionSetup mode="method_training" />} />
     <Route path="/training/guided/:id" element={<GuidedTrainingPage />} />
+    <Route path="/training/branching/:id" element={<BranchingTrainingPage />} />
     <Route path="/training/session/:id" element={<GameDialog />} />
     <Route path="/session/:id" element={<GameDialog />} />
     <Route path="/story" element={<Story />} />

@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AdminChoice, AdminMission, AdminMissionWrite, AdminOverview, api, ApiError } from './api';
+import { AdminChoice, AdminGuidedAuthoring, AdminGuidedStep, AdminMission, AdminMissionWrite, AdminOverview, api, ApiError } from './api';
 import { useAuth } from './auth-context';
+import { BranchingEditor } from './BranchingEditor';
 
 type Section = 'storylines' | 'missions' | 'training' | 'characters' | 'knowledge';
 type BasicKind = 'storylines' | 'characters' | 'knowledge';
@@ -66,12 +67,19 @@ function BasicEditor({ kind, id, overview, saved }: { kind: BasicKind; id: strin
 }
 
 const newChoice = (index: number): AdminChoice => ({ id: `answer_${index}`, text: '', feedback: '', quality: index === 1 ? 0.9 : 0.2, contact: 0, tension: 0, progress: index === 1 ? 70 : 5, critical_error: false });
+const newGuidedStep = (): AdminGuidedStep => ({ speaker: 'Старшая коллега', text: '', goal: '', hint: '', options: [
+  { text: '', effect: '', feedback: '', assessment: 'incorrect' },
+  { text: '', effect: '', feedback: '', assessment: 'correct' },
+  { text: '', effect: '', feedback: '', assessment: 'partial' },
+] });
+const newGuided = (): AdminGuidedAuthoring => ({ steps: [newGuidedStep()], final_situation: '', final_goal: '', criteria: [''], example_answer: '' });
 
 function MissionEditor({ kind, id, overview, saved }: { kind: 'missions' | 'training'; id: string | null; overview: AdminOverview; saved: (id: string) => void }) {
   const token = sessionStorage.getItem('arena_token') || '';
   const [mission, setMission] = useState<AdminMission | null>(null);
-  const [interaction, setInteraction] = useState<'ai_dialogue' | 'single_choice'>(kind === 'training' ? 'single_choice' : 'ai_dialogue');
+  const [interaction, setInteraction] = useState<'ai_dialogue' | 'single_choice' | 'guided_training'>(kind === 'training' ? 'guided_training' : 'ai_dialogue');
   const [choices, setChoices] = useState<AdminChoice[]>([newChoice(1), newChoice(2)]);
+  const [guided, setGuided] = useState<AdminGuidedAuthoring>(newGuided);
   const [hints, setHints] = useState<string[]>(['']);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -79,14 +87,18 @@ function MissionEditor({ kind, id, overview, saved }: { kind: 'missions' | 'trai
 
   useEffect(() => {
     setMission(null); setError(''); setNotice('');
-    if (!id) { setInteraction(kind === 'training' ? 'single_choice' : 'ai_dialogue'); setChoices([newChoice(1), newChoice(2)]); setHints(['']); return; }
+    if (!id) { setInteraction(kind === 'training' ? 'guided_training' : 'ai_dialogue'); setChoices([newChoice(1), newChoice(2)]); setGuided(newGuided()); setHints(['']); return; }
     let active = true;
-    api.adminMission(token, id).then(value => { if (active) { setMission(value); setInteraction(kind === 'training' ? 'single_choice' : 'ai_dialogue'); setChoices(value.config.training?.choices || [newChoice(1), newChoice(2)]); setHints(value.config.training?.hints || ['']); } })
+    api.adminMission(token, id).then(value => { if (active) { setMission(value); setInteraction(value.interaction_type as typeof interaction); setChoices(value.config.training?.choices || [newChoice(1), newChoice(2)]); setGuided(value.config.guided?.authoring || newGuided()); setHints(value.config.training?.hints || ['']); } })
       .catch(cause => { if (active) setError(textError(cause)); });
     return () => { active = false; };
   }, [id, kind]);
 
   function updateChoice(index: number, patch: Partial<AdminChoice>) { setChoices(values => values.map((choice, position) => position === index ? { ...choice, ...patch } : choice)); }
+  function updateGuidedStep(index: number, patch: Partial<AdminGuidedStep>) { setGuided(value => ({ ...value, steps: value.steps.map((step, position) => position === index ? { ...step, ...patch } : step) })); }
+  function updateGuidedOption(stepIndex: number, optionIndex: number, patch: Partial<AdminGuidedStep['options'][number]>) {
+    setGuided(value => ({ ...value, steps: value.steps.map((step, position) => position === stepIndex ? { ...step, options: step.options.map((option, choicePosition) => choicePosition === optionIndex ? { ...option, ...patch } : option) } : step) }));
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -97,10 +109,15 @@ function MissionEditor({ kind, id, overview, saved }: { kind: 'missions' | 'trai
       knowledge_item_id: kind === 'training' ? value('knowledge_item_id') || null : null,
       character_id: value('character_id'), branch_key: kind === 'missions' ? value('branch_key') : null,
       order_index: kind === 'missions' ? Number(value('order_index')) : null,
-      title: value('title'), situation: value('situation'), public_context: value('public_context'), task: value('task'),
-      opening_message: value('opening_message'), max_turns: interaction === 'single_choice' ? 1 : Number(value('max_turns')),
+      title: value('title'), situation: interaction === 'guided_training' ? guided.steps[0].text.trim() : value('situation'),
+      public_context: interaction === 'guided_training' ? guided.steps[0].text.trim() : value('public_context'),
+      task: interaction === 'guided_training' ? guided.steps[0].goal.trim() : value('task'),
+      opening_message: interaction === 'guided_training' ? guided.steps[0].text.trim() : value('opening_message'), max_turns: interaction === 'ai_dialogue' ? Number(value('max_turns')) : 1,
       choices: interaction === 'single_choice' ? choices.map(choice => ({ ...choice, id: choice.id.trim(), text: choice.text.trim(), feedback: choice.feedback.trim() })) : [],
-      hints: kind === 'training' ? hints.map(hint => hint.trim()).filter(Boolean) : [],
+      hints: interaction === 'single_choice' ? hints.map(hint => hint.trim()).filter(Boolean) : [],
+      guided: interaction === 'guided_training' ? { ...guided,
+        steps: guided.steps.map(step => ({ ...step, speaker: step.speaker.trim(), text: step.text.trim(), goal: step.goal.trim(), hint: step.hint.trim(), options: step.options.map(option => ({ ...option, text: option.text.trim(), effect: option.effect.trim(), feedback: option.feedback.trim() })) })),
+        criteria: guided.criteria.map(criterion => criterion.trim()), final_situation: guided.final_situation.trim(), final_goal: guided.final_goal.trim(), example_answer: guided.example_answer.trim() } : null,
     };
     setPending(true); setError(''); setNotice('');
     try { const result = await api.adminSave(token, 'missions', body, id || undefined); saved(result.id); setNotice('Сценарий сохранён.'); }
@@ -115,20 +132,41 @@ function MissionEditor({ kind, id, overview, saved }: { kind: 'missions' | 'trai
     finally { setPending(false); }
   }
   if (id && !mission) return <div className="admin-editor"><div className="notice">{error || 'Загружаем сценарий…'}</div></div>;
-  if (mission?.interaction_type === 'guided_training') return <div className="admin-editor"><div className="admin-editor-heading"><span className="eyebrow">Редакционная тренировка</span><h2>{mission.title}</h2></div><p>Эта тренировка состоит из связанных ситуаций, вариантов, подсказок и финальной проверки. Содержание загружается из редакционной таблицы.</p><p>Чтобы изменить сценарий, обновите исходные данные и повторите импорт.</p><div className="admin-form-actions"><Link className="button primary" to={`/training/mission/${id}`}>Посмотреть как игрок →</Link><button type="button" className="button outline" disabled={pending} onClick={() => changeStatus(mission.status === 'published' ? 'archived' : 'published')}>{mission.status === 'published' ? 'В архив' : 'Опубликовать'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="admin-success" role="status">{notice}</p>}</div>;
+  if (mission?.interaction_type === 'branching_training' || (mission?.interaction_type === 'guided_training' && mission.config.guided?.source !== 'admin')) return <div className="admin-editor"><div className="admin-editor-heading"><span className="eyebrow">Редакционная тренировка</span><h2>{mission.title}</h2></div><p>Эта тренировка состоит из связанных ситуаций и вариантов ответа. Содержание загружается из редакционной таблицы.</p><p>Чтобы изменить сценарий, обновите исходные данные и повторите импорт.</p><div className="admin-form-actions"><Link className="button primary" to={`/training/mission/${id}`}>Посмотреть как игрок →</Link><button type="button" className="button outline" disabled={pending} onClick={() => changeStatus(mission.status === 'published' ? 'archived' : 'published')}>{mission.status === 'published' ? 'В архив' : 'Опубликовать'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="admin-success" role="status">{notice}</p>}</div>;
   return <div className="admin-editor"><div className="admin-editor-heading"><span className="eyebrow">{id ? 'Редактирование' : 'Создание'}</span><h2>{kind === 'training' ? 'Тренировка' : 'Сюжетная миссия'}</h2></div>
     <form className="admin-form" onSubmit={submit} key={id || kind}>
       <label>Название<input name="title" defaultValue={mission?.title || ''} required maxLength={200} placeholder="Например, разговор о сроках" /></label>
+      {kind === 'training' && <label>Формат тренировки<select value={interaction} onChange={event => setInteraction(event.target.value as typeof interaction)}><option value="guided_training">Пошаговая: ситуации, подсказки, финальный ответ</option><option value="single_choice">Короткая: один выбор</option></select></label>}
       <div className="admin-fields two"><label>{kind === 'missions' ? 'Сюжетная ветка' : 'Тема знаний'}<select name={kind === 'missions' ? 'storyline_id' : 'knowledge_item_id'} defaultValue={kind === 'missions' ? mission?.storyline_id || '' : mission?.knowledge_item_id || ''} required><option value="">Выберите</option>{(kind === 'missions' ? overview.storylines : overview.knowledge).map(value => <option key={value.id} value={value.id}>{value.title} · {value.status}</option>)}</select></label>
         <label>Собеседник<select name="character_id" defaultValue={mission?.character_id || ''} required><option value="">Выберите</option>{overview.characters.map(value => <option key={value.id} value={value.id}>{value.name} · {value.role_title}</option>)}</select></label></div>
       {kind === 'missions' && <div className="admin-fields two"><label>Ключ ветки<input name="branch_key" defaultValue={mission?.branch_key || 'main'} required maxLength={80} /></label><label>Порядок<input name="order_index" type="number" min={1} defaultValue={mission?.order_index || 1} required /></label></div>}
-      <label>Ситуация<textarea name="situation" defaultValue={mission?.context.situation || ''} required minLength={10} rows={3} placeholder="Что происходит в сцене" /></label>
+      {interaction !== 'guided_training' && <><label>Ситуация<textarea name="situation" defaultValue={mission?.context.situation || ''} required minLength={10} rows={3} placeholder="Что происходит в сцене" /></label>
       <label>Что известно игроку: факты, возможности и ограничения<textarea name="public_context" defaultValue={mission?.context.public_context || ''} rows={4} placeholder="Например: к сроку готовы два модуля; третий требует проверки. Можно согласовать поэтапный выпуск." /></label>
       <label>Задача игрока<textarea name="task" defaultValue={mission?.task || ''} required minLength={5} rows={2} /></label>
-      <label>Первая реплика собеседника<textarea name="opening_message" defaultValue={mission?.context.opening_message || ''} required minLength={2} rows={2} /></label>
+      <label>Первая реплика собеседника<textarea name="opening_message" defaultValue={mission?.context.opening_message || ''} required minLength={2} rows={2} /></label></>}
       {kind === 'training' && <p className="form-note">Тренировка работает по подготовленным вариантам, последствиям и подсказкам. AI используется только в сюжете и своём диалоге.</p>}
       {interaction === 'ai_dialogue' && <label>Лимит реплик<input name="max_turns" type="number" min={1} max={50} defaultValue={mission?.config.max_turns || 20} required /></label>}
-      {kind === 'training' && <div className="admin-nested"><div className="admin-nested-head"><h3>Подсказки</h3><button type="button" className="button outline small" onClick={() => setHints(values => [...values, ''])} disabled={hints.length >= 5}>Добавить</button></div>{hints.map((hint, index) => <div className="admin-inline" key={index}><input value={hint} maxLength={500} onChange={event => setHints(values => values.map((item, position) => position === index ? event.target.value : item))} placeholder={`Подсказка ${index + 1}`} /><button type="button" onClick={() => setHints(values => values.filter((_, position) => position !== index))} aria-label={`Удалить подсказку ${index + 1}`}>×</button></div>)}</div>}
+      {interaction === 'single_choice' && <div className="admin-nested"><div className="admin-nested-head"><h3>Подсказки</h3><button type="button" className="button outline small" onClick={() => setHints(values => [...values, ''])} disabled={hints.length >= 5}>Добавить</button></div>{hints.map((hint, index) => <div className="admin-inline" key={index}><input value={hint} maxLength={500} onChange={event => setHints(values => values.map((item, position) => position === index ? event.target.value : item))} placeholder={`Подсказка ${index + 1}`} /><button type="button" onClick={() => setHints(values => values.filter((_, position) => position !== index))} aria-label={`Удалить подсказку ${index + 1}`}>×</button></div>)}</div>}
+      {interaction === 'guided_training' && <div className="admin-nested"><div className="admin-nested-head"><div><h3>Ситуации тренировки</h3><p>После ошибочного ответа игрок получит разбор и сможет повторить шаг с подсказкой. После верного ответа перейдёт к следующему шагу.</p></div><button type="button" className="button outline small" disabled={guided.steps.length >= 8} onClick={() => setGuided(value => ({ ...value, steps: [...value.steps, newGuidedStep()] }))}>Добавить ситуацию</button></div>
+        {guided.steps.map((step, stepIndex) => <div className="admin-choice" key={stepIndex}><div className="admin-nested-head"><h3>Ситуация {stepIndex + 1}</h3><button type="button" disabled={guided.steps.length === 1} onClick={() => setGuided(value => ({ ...value, steps: value.steps.filter((_, index) => index !== stepIndex) }))}>Удалить</button></div>
+          <label>Кто задаёт ситуацию<input value={step.speaker} onChange={event => updateGuidedStep(stepIndex, { speaker: event.target.value })} required maxLength={160} /></label>
+          <label>Что происходит и какой вопрос звучит<textarea value={step.text} onChange={event => updateGuidedStep(stepIndex, { text: event.target.value })} required minLength={10} maxLength={3000} rows={4} /></label>
+          <label>Цель шага<textarea value={step.goal} onChange={event => updateGuidedStep(stepIndex, { goal: event.target.value })} required minLength={5} maxLength={1000} rows={2} /></label>
+          <label>Подсказка наставницы при повторной попытке<textarea value={step.hint} onChange={event => updateGuidedStep(stepIndex, { hint: event.target.value })} required minLength={5} maxLength={1000} rows={2} /></label>
+          {step.options.map((option, optionIndex) => <div className="admin-choice" key={optionIndex}><strong>Ответ {optionIndex + 1}</strong><label>Решение игрока<textarea value={option.text} onChange={event => updateGuidedOption(stepIndex, optionIndex, { text: event.target.value })} required minLength={2} maxLength={1000} rows={2} /></label>
+            <label>Последствие или реплика собеседника<textarea value={option.effect} onChange={event => updateGuidedOption(stepIndex, optionIndex, { effect: event.target.value })} maxLength={2000} rows={2} /></label>
+            <label>Разбор наставницы<textarea value={option.feedback} onChange={event => updateGuidedOption(stepIndex, optionIndex, { feedback: event.target.value })} required minLength={2} maxLength={2000} rows={2} /></label>
+            <label>Оценка<select value={option.assessment} onChange={event => updateGuidedOption(stepIndex, optionIndex, { assessment: event.target.value as typeof option.assessment })}><option value="correct">Верно · следующий шаг</option><option value="partial">Частично · повторить</option><option value="incorrect">Неверно · повторить</option></select></label>
+          </div>)}
+        </div>)}
+        <div className="admin-choice"><h3>Финальная ситуация</h3><p>Игрок ответит своими словами и затем увидит критерии для самопроверки.</p>
+          <label>Новая ситуация<textarea value={guided.final_situation} onChange={event => setGuided(value => ({ ...value, final_situation: event.target.value }))} required minLength={10} maxLength={3000} rows={4} /></label>
+          <label>Цель ответа<textarea value={guided.final_goal} onChange={event => setGuided(value => ({ ...value, final_goal: event.target.value }))} required minLength={5} maxLength={1000} rows={2} /></label>
+          <div className="admin-nested-head"><h3>Критерии самопроверки</h3><button type="button" className="button outline small" disabled={guided.criteria.length >= 6} onClick={() => setGuided(value => ({ ...value, criteria: [...value.criteria, ''] }))}>Добавить</button></div>
+          {guided.criteria.map((criterion, index) => <div className="admin-inline" key={index}><input value={criterion} onChange={event => setGuided(value => ({ ...value, criteria: value.criteria.map((item, position) => position === index ? event.target.value : item) }))} required minLength={5} maxLength={500} placeholder={`Критерий ${index + 1}`} /><button type="button" disabled={guided.criteria.length === 1} onClick={() => setGuided(value => ({ ...value, criteria: value.criteria.filter((_, position) => position !== index) }))} aria-label={`Удалить критерий ${index + 1}`}>×</button></div>)}
+          <label>Пример ответа<textarea value={guided.example_answer} onChange={event => setGuided(value => ({ ...value, example_answer: event.target.value }))} required minLength={10} maxLength={5000} rows={4} /></label>
+        </div>
+      </div>}
       {interaction === 'single_choice' && <div className="admin-nested"><div className="admin-nested-head"><div><h3>Варианты ответа</h3><p>Один ответ должен давать минимум 50 прогресса: это условие успеха в короткой тренировке.</p></div><button className="button outline small" type="button" disabled={choices.length >= 12} onClick={() => setChoices(values => [...values, newChoice(values.length + 1)])}>Добавить</button></div>
         {choices.map((choice, index) => <div className="admin-choice" key={index}><div className="admin-nested-head"><strong>Ответ {index + 1}</strong><button type="button" onClick={() => setChoices(values => values.filter((_, position) => position !== index))} disabled={choices.length <= 2}>Удалить</button></div>
           <div className="admin-fields two"><label>ID<input value={choice.id} pattern="[a-z0-9_-]+" maxLength={40} onChange={event => updateChoice(index, { id: event.target.value })} required /></label><label>Качество, от 0 до 1<input type="number" min={0} max={1} step={0.1} value={choice.quality} onChange={event => updateChoice(index, { quality: Number(event.target.value) })} required /></label></div>
@@ -158,16 +196,27 @@ export function AdminPage() {
   const list = section === 'missions' ? overview?.missions.filter(item => item.mission_type === 'story')
     : section === 'training' ? overview?.missions.filter(item => item.mission_type === 'method_training')
       : overview?.[section];
+  const orderedTraining = [...(overview?.missions.filter(item => item.mission_type === 'method_training') || [])].sort((a, b) =>
+    (a.branch_key === b.branch_key ? (a.order_index || 0) - (b.order_index || 0) :
+      a.branch_key === 'methods' ? -1 : b.branch_key === 'methods' ? 1 :
+        a.branch_key === 'principles' ? -1 : 1));
   function choose(next: Section) { setSection(next); setSelected(null); }
   function saved(id: string) { setSelected(id); refresh(); }
   return <div className="section-wrap admin-page"><div className="admin-title"><span className="eyebrow">Управление игрой</span><h1>Редактор контента</h1><p>Создавайте черновики, проверяйте их и публикуйте для игроков. Демо-материалы помечены в названии.</p></div>
     <div className="admin-tabs" role="tablist" aria-label="Разделы админки">{sections.map(item => <button key={item.key} role="tab" aria-selected={section === item.key} className={section === item.key ? 'active' : ''} onClick={() => choose(item.key)}>{item.label}</button>)}</div>
     {error && <div className="notice error" role="alert">{error}</div>}
     <div className="admin-layout"><aside className="admin-list"><div className="admin-list-head"><h2>{active.label}</h2><button className="button outline small" onClick={() => setSelected(null)}>{active.create} +</button></div>
-      {!overview ? <div className="notice">Загружаем контент…</div> : list?.length ? list.map(item => <button className={`admin-list-item ${selected === item.id ? 'active' : ''}`} key={item.id} onClick={() => setSelected(item.id)}><strong>{'name' in item ? item.name : item.title}</strong><span>{'status' in item ? statusLabel[item.status] || item.status : 'Персонаж'}</span></button>) : <div className="notice">В этом разделе пока нет материалов.</div>}
+      {!overview ? <div className="notice">Загружаем контент…</div> : list?.length ? section === 'training'
+        ? (['methods', 'principles', 'other'] as const).map(group => {
+          const items = orderedTraining.filter(item => group === 'other' ? !['methods', 'principles'].includes(item.branch_key || '') : item.branch_key === group);
+          return items.length ? <div key={group} className="admin-training-group"><h3>{group === 'methods' ? 'Методы' : group === 'principles' ? 'Принципы' : 'Прежние тренировки'}</h3>{items.map(item => <button className={`admin-list-item ${selected === item.id ? 'active' : ''}`} key={item.id} onClick={() => setSelected(item.id)}><strong>{item.order_index ? `${item.order_index}. ` : ''}{item.title}</strong><span>{statusLabel[item.status] || item.status}</span></button>)}</div> : null;
+        })
+        : list.map(item => <button className={`admin-list-item ${selected === item.id ? 'active' : ''}`} key={item.id} onClick={() => setSelected(item.id)}><strong>{'name' in item ? item.name : item.title}</strong><span>{'status' in item ? statusLabel[item.status] || item.status : 'Персонаж'}</span></button>) : <div className="notice">В этом разделе пока нет материалов.</div>}
     </aside>
       {overview && (section === 'missions' || section === 'training'
-        ? <MissionEditor key={`${section}:${selected || 'new'}`} kind={section} id={selected} overview={overview} saved={saved} />
+        ? section === 'training' && (!selected || overview.missions.find(item => item.id === selected)?.interaction_type === 'branching_training')
+          ? <BranchingEditor key={`${section}:${selected || 'new'}`} id={selected} overview={overview} saved={saved} />
+          : <MissionEditor key={`${section}:${selected || 'new'}`} kind={section} id={selected} overview={overview} saved={saved} />
         : <BasicEditor key={`${section}:${selected || 'new'}`} kind={section} id={selected} overview={overview} saved={saved} />)}
     </div>
   </div>;

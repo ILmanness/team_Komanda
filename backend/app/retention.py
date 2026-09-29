@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 async def cleanup(apply: bool = False) -> dict[str, int]:
     settings = get_settings()
-    counts = {'abandoned': 0, 'histories_purged': 0, 'sessions_deleted': 0}
+    counts = {'abandoned': 0, 'histories_purged': 0, 'sessions_deleted': 0, 'tokens_purged': 0}
     async with engine.connect() as connection:
         transaction = await connection.begin()
         try:
@@ -58,6 +58,13 @@ async def cleanup(apply: bool = False) -> dict[str, int]:
                         lock_version = lock_version + 1 WHERE id = :id
                 '''), {'id': session_id})
             counts['histories_purged'] = len(histories)
+            tokens = (await connection.execute(text('''
+                DELETE FROM revoked_access_tokens WHERE token_hash IN (
+                    SELECT token_hash FROM revoked_access_tokens WHERE expires_at < now()
+                    ORDER BY expires_at LIMIT :batch FOR UPDATE SKIP LOCKED
+                ) RETURNING token_hash
+            '''), {'batch': BATCH_SIZE})).scalars().all()
+            counts['tokens_purged'] = len(tokens)
             if apply:
                 await transaction.commit()
             else:

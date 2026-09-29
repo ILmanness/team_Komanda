@@ -1,4 +1,7 @@
-from fastapi import APIRouter, HTTPException, status
+from typing import Annotated
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials
+from jwt import InvalidTokenError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
@@ -10,10 +13,14 @@ from app.auth.schemas import (
     UserResponse,
 )
 from app.auth.security import (
+    access_token_expires_at,
+    access_token_hash,
     create_access_token,
+    decode_access_token,
     hash_password,
     verify_password,
 )
+from app.auth.dependencies import bearer_scheme
 from app.db import engine
 
 router = APIRouter(
@@ -167,7 +174,18 @@ async def login(data: LoginRequest):
     "/logout",
     response_model=MessageResponse,
 )
-def logout():
+async def logout(credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)]):
+    token = credentials.credentials
+    try:
+        decode_access_token(token)
+        expires_at = access_token_expires_at(token)
+    except (InvalidTokenError, ValueError, KeyError):
+        raise HTTPException(status_code=401, detail='Invalid or expired token') from None
+    async with engine.begin() as connection:
+        await connection.execute(text('''
+            INSERT INTO revoked_access_tokens (token_hash, expires_at)
+            VALUES (:token_hash, :expires_at) ON CONFLICT (token_hash) DO NOTHING
+        '''), {'token_hash': access_token_hash(token), 'expires_at': expires_at})
     return MessageResponse(
         message="Successfully logged out",
     )

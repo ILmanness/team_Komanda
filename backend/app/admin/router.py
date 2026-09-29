@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.admin.schemas import CharacterWrite, KnowledgeWrite, MissionWrite, StorylineWrite
+from app.admin.guided_authoring import build_guided
 from app.auth.dependencies import get_current_user
 from app.db import engine
 
@@ -120,7 +121,7 @@ async def update_knowledge(item_id: UUID, data: KnowledgeWrite, _admin: AdminUse
 
 def _mission_params(data: MissionWrite) -> dict:
     training = None
-    if data.mission_type == 'method_training':
+    if data.interaction_type == 'single_choice':
         training = {
             'hints': data.hints,
             'choices': [choice.model_dump() for choice in data.choices],
@@ -131,14 +132,17 @@ def _mission_params(data: MissionWrite) -> dict:
         'storyline_id': data.storyline_id,
         'knowledge_item_id': data.knowledge_item_id,
         'character_id': data.character_id,
-        'branch_key': data.branch_key if data.mission_type == 'story' else None,
-        'order_index': data.order_index if data.mission_type == 'story' else None,
+        'branch_key': data.branch_key if data.interaction_type == 'branching_training' or data.mission_type == 'story' else None,
+        'order_index': data.order_index if data.interaction_type == 'branching_training' or data.mission_type == 'story' else None,
         'title': data.title,
         'task': data.task,
         'context': Jsonb({'situation': data.situation, 'public_context': data.public_context,
                           'opening_message': data.opening_message}),
-        'config': Jsonb({'max_turns': 1 if data.interaction_type == 'single_choice' else data.max_turns,
-                         'training': training}),
+        'config': Jsonb({'branching': {**data.branching.model_dump(), 'source': 'admin'}}
+                        if data.interaction_type == 'branching_training' else
+                        {'guided': build_guided(data)} if data.interaction_type == 'guided_training'
+                        else {'max_turns': 1 if data.interaction_type == 'single_choice' else data.max_turns,
+                              'training': training}),
     }
 
 
@@ -160,8 +164,8 @@ async def create_mission(data: MissionWrite, _admin: AdminUser):
 
 @router.put('/missions/{item_id}')
 async def update_mission(item_id: UUID, data: MissionWrite, _admin: AdminUser):
-    existing = await _one('SELECT mission_type, interaction_type FROM missions WHERE id=:id', {'id': item_id})
-    if existing['interaction_type'] == 'guided_training':
+    existing = await _one('SELECT mission_type, interaction_type, config FROM missions WHERE id=:id', {'id': item_id})
+    if existing['interaction_type'] == 'guided_training' and ((existing['config'] or {}).get('guided') or {}).get('source') != 'admin':
         raise HTTPException(status_code=409, detail='Guided training is managed by the editorial import')
     if existing['mission_type'] != data.mission_type:
         raise HTTPException(status_code=422, detail='Mission mode cannot be changed after creation')
@@ -194,6 +198,14 @@ async def set_status(kind: Literal['storylines', 'missions', 'knowledge'], item_
             choices = ((mission['config'] or {}).get('training') or {}).get('choices', [])
             if len(choices) < 2:
                 raise HTTPException(status_code=422, detail='Add at least two answers')
+        if mission['interaction_type'] == 'guided_training':
+            guided = (mission['config'] or {}).get('guided') or {}
+            if not guided.get('nodes') or not guided.get('assessments') or not guided.get('transfer_node_id'):
+                raise HTTPException(status_code=422, detail='Complete the guided training first')
+        if mission['interaction_type'] == 'branching_training':
+            branching = (mission['config'] or {}).get('branching') or {}
+            if not any(item.get('status') == 'active' for item in branching.get('scenarios', [])):
+                raise HTTPException(status_code=422, detail='Add an active training scenario')
     return await _write(f'''UPDATE {table} SET status=:status, updated_at=now()
                       WHERE id=:id RETURNING id, status''',
                   {'id': item_id, 'status': data.status})

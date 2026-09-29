@@ -8,6 +8,11 @@ function describeError(error: unknown) {
   return error instanceof ApiError ? error.message : 'Не удалось связаться с сервером.';
 }
 
+function friendlyNotice(value: string | null) {
+  return value === 'Теперь можно пересмотреть выбор с подсказкой. Первоначальный ответ сохранён.'
+    ? 'Попробуй ещё раз. Если не знаешь, спроси — я расскажу.' : value;
+}
+
 export default function GuidedTrainingPage() {
   const { id = '' } = useParams();
   const { user, checking, openAuth } = useAuth();
@@ -78,7 +83,7 @@ export default function GuidedTrainingPage() {
     const exchange: NovelLine[] = [{ key: `choice-${event.sequence_no}`, role: 'user', content: event.choice_text }];
     if (event.effect) exchange.push({ key: `effect-${event.sequence_no}`, role: 'assistant', content: `Представим ответ собеседника: «${event.effect}»`, emotion: event.assessment === 'correct' ? 'warm' : 'tense' });
     exchange.push({ key: `feedback-${event.sequence_no}`, role: 'assistant', content: event.feedback_text, emotion: event.assessment === 'correct' ? 'warm' : event.assessment === 'incorrect' ? 'tense' : 'neutral' });
-    if (event.transition_notice) exchange.push({ key: `transition-${event.sequence_no}`, role: 'assistant', content: event.transition_notice, emotion: 'neutral' });
+    if (event.transition_notice) exchange.push({ key: `transition-${event.sequence_no}`, role: 'assistant', content: friendlyNotice(event.transition_notice) || '', emotion: 'neutral' });
     return exchange;
   });
   if (draftChoice) lines.push({ key: `choice-${training.events.length + 1}`, role: 'user', content: draftChoice });
@@ -120,7 +125,7 @@ export default function GuidedTrainingPage() {
           <p>Ответ сохранён. Тренировка использует подготовленные варианты и объяснения наставницы; нейросеть здесь не оценивает вас.</p>
           {training.criteria.length > 0 && <ul>{training.criteria.map(criterion => <li key={criterion.criterion_id}><strong>{criterion.criterion}</strong></li>)}</ul>}
           {training.example_answer && <details><summary>Посмотреть пример ответа</summary><p>{training.example_answer}</p></details>}
-          <div className="guided-result-links"><Link className="button primary" to="/training">К тренировкам →</Link><Link className="button outline" to="/knowledge">Повторить материал {training.material_id}</Link></div>
+          <div className="guided-result-links"><Link className="button primary" to="/training">К тренировкам →</Link><Link className="button outline" to="/knowledge">Повторить материал</Link></div>
         </div>}
         {error && <p className="form-error" role="alert">{error}</p>}
       </section></div>

@@ -187,6 +187,19 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 .notice.error { color: #953c2f; background: #ffe8dd; border-color: #b34835; }
 
 .list-grid, .knowledge-list, .story-grid, .mission-timeline { display: grid; gap: 13px; }
+.training-catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.training-group { min-width: 0; border: 2px solid #26383d; background: #fffdf8; }
+.training-group-heading { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 24px 26px; background: #f3c386; border-bottom: 2px solid #26383d; }
+.training-group:nth-child(2) .training-group-heading { background: #cbe1df; }
+.training-group-heading h3 { margin: 5px 0 7px; font-size: clamp(28px, 3vw, 38px); letter-spacing: -.04em; }
+.training-group-heading p { margin: 0; line-height: 1.5; }
+.training-tool-list { display: grid; }
+.training-tool { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 26px; color: #26383d; border-bottom: 1px solid #9db0af; text-decoration: none; }
+.training-tool:last-child { border-bottom: 0; }
+.training-tool:hover, .training-tool:focus-visible { background: #ffedcf; }
+.training-tool strong { font-size: 17px; }
+.training-tool span { font-size: 20px; }
+.training-group-empty { margin: 0; padding: 24px 26px; }
 .list-card, .knowledge-row, .story-card, .timeline-item { padding: 25px; display: flex; align-items: center; gap: 22px; background: #fffdf8; border: 2px solid #26383d; border-radius: 3px; }
 .list-card > div, .knowledge-row > div, .timeline-item > div { flex: 1; }
 .list-card > div, .knowledge-row > div, .timeline-item > div, .story-card > div { min-width: 0; }
@@ -269,6 +282,9 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
   .module-card h3 { margin-top: 17px; font-size: 31px; }
   .module-card p { margin-bottom: 19px; }
   .training-banner { grid-template-columns: 1fr; padding-top: 23px; padding-bottom: 23px; }
+  .training-catalog { grid-template-columns: 1fr; }
+  .training-group-heading { padding: 20px; }
+  .training-tool { padding: 15px 20px; }
   .training-banner > div { padding: 26px; border-right: 2px solid #26383d; border-bottom: 0; }
   .training-banner h1 { font-size: 40px; }
   .training-banner p { font-size: 15px; }
@@ -629,6 +645,23 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 .admin-inline { display: flex; gap: 8px; }
 .admin-inline button, .admin-choice .admin-nested-head > button { padding: 6px 10px; border: 1px solid #26383d; background: #fffaf1; cursor: pointer; }
 .admin-choice { display: grid; gap: 13px; padding: 16px; background: #fffdf8; border: 1px solid #26383d; }
+.admin-training-group + .admin-training-group { margin-top: 18px; }
+.admin-training-group h3 { margin: 0 0 8px; padding-bottom: 6px; border-bottom: 1px solid #8c9c9b; font-size: 13px; letter-spacing: .09em; text-transform: uppercase; }
+.branching-editor .admin-editor-heading p { margin: 8px 0 0; line-height: 1.5; color: #526469; }
+.branching-scenario { background: #f4e9d4; border-width: 2px; }
+.branching-node { background: #fffdf8; }
+.branching-node h4, .branching-answer strong { margin: 0; font-size: 15px; }
+.branching-node h4 small { display: block; margin-top: 4px; color: #526469; font-size: 11px; font-weight: 400; overflow-wrap: anywhere; }
+.branching-answer { margin-left: 14px; background: #f9f1e5; border-color: #8c9c9b; }
+.branching-tabs { display: flex; flex-wrap: wrap; gap: 7px; }
+.branching-tabs button { max-width: 100%; padding: 8px 10px; border: 1px solid #8c9c9b; background: #fffaf1; color: #26383d; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+.branching-tabs button.active { border-color: #26383d; background: #26383d; color: #fffaf1; }
+@media (max-width: 700px) {
+  .branching-editor .admin-fields.two, .branching-editor .admin-fields.three { grid-template-columns: 1fr; }
+  .branching-editor .admin-nested-head { align-items: flex-start; flex-wrap: wrap; }
+  .branching-editor .admin-inline { flex-wrap: wrap; }
+  .branching-answer { margin-left: 0; }
+}
 .admin-form .admin-check { display: flex; align-items: center; gap: 10px; }
 .admin-form .admin-check input { width: 18px; height: 18px; flex: 0 0 auto; }
 .training-choices { display: grid; gap: 10px; }

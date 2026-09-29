@@ -1,6 +1,7 @@
 """Run with RUN_DB_TESTS=1. Only a uniquely named test schema is removed."""
 import asyncio
 import os
+from types import SimpleNamespace
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -26,6 +27,8 @@ from app.game import service as game_service
 from app.game.evaluator import Evaluator
 from app.main import app
 from app.sessions import router as sessions_router
+from app.sessions import guided as guided_router
+from app.sessions import branching as branching_router
 from app.sessions import websocket as sessions_websocket
 from app.users import router as users_router
 
@@ -183,7 +186,7 @@ def test_retention_dry_run_and_apply(database):
         old = create_session(connection, days=8)
         expired = create_session(connection, days=31)
         idle = create_session(connection, idle_days=31)
-    expected = {'abandoned': 1, 'histories_purged': 1, 'sessions_deleted': 1}
+    expected = {'abandoned': 1, 'histories_purged': 1, 'sessions_deleted': 1, 'tokens_purged': 0}
     assert asyncio.run(retention.cleanup()) == expected
     with database.connect() as connection:
         assert connection.execute(text('SELECT count(*) FROM game_sessions')).scalar() == 4
@@ -195,7 +198,7 @@ def test_retention_dry_run_and_apply(database):
             assert connection.execute(text('SELECT count(*) FROM session_messages WHERE session_id = :id'), {'id': session_id}).scalar() == 2
         row = connection.execute(text('SELECT custom_context, memory_summary, history_purged_at FROM game_sessions WHERE id = :id'), {'id': old}).one()
         assert row[0] == row[1] == {} and row[2] is not None
-    assert asyncio.run(retention.cleanup(apply=True)) == {'abandoned': 0, 'histories_purged': 0, 'sessions_deleted': 0}
+    assert asyncio.run(retention.cleanup(apply=True)) == {'abandoned': 0, 'histories_purged': 0, 'sessions_deleted': 0, 'tokens_purged': 0}
 
 
 def test_duplicate_message_rejected(database):
@@ -621,6 +624,164 @@ def test_admin_training_choice_is_private_and_playable(database, monkeypatch):
     assert client.get(f'/api/v1/sessions/{session_id}', headers=player_headers).json()['status'] == 'completed'
 
 
+def test_admin_can_edit_branching_training_and_player_can_finish_it(database, monkeypatch):
+    import json
+
+    for module in (auth_dependencies, admin_router, catalog_router, sessions_router,
+                   branching_router):
+        monkeypatch.setattr(module, 'engine', database)
+    with database.begin() as connection:
+        admin_id = connection.execute(text(
+            "INSERT INTO users(display_name, role) VALUES ('Admin', 'admin') RETURNING id"
+        )).scalar_one()
+        player_id = connection.execute(text(
+            "INSERT INTO users(display_name) VALUES ('Player') RETURNING id"
+        )).scalar_one()
+        character_id = connection.execute(text(
+            "INSERT INTO characters(slug, name) VALUES ('test-mentor', 'Наставник') RETURNING id"
+        )).scalar_one()
+        topic_id = connection.execute(text(
+            "INSERT INTO knowledge_items(slug, item_type, title, status) VALUES ('test-method', 'topic', 'Методы', 'published') RETURNING id"
+        )).scalar_one()
+    tool = json.loads((Path(__file__).parents[1] / 'content' / 'branching_trainings.json').read_text(encoding='utf-8'))['tools'][0]
+    first = tool['scenarios'][0]['nodes'][tool['scenarios'][0]['start_node_id']]['text']
+    body = {'mission_type': 'method_training', 'interaction_type': 'branching_training',
+            'knowledge_item_id': str(topic_id), 'character_id': str(character_id),
+            'branch_key': tool['category'], 'order_index': tool['order'],
+            'title': tool['title'], 'task': tool['description'],
+            'situation': first, 'public_context': first, 'opening_message': first,
+            'branching': tool}
+    client = TestClient(app)
+    admin_headers = {'Authorization': f'Bearer {create_access_token(admin_id)}'}
+    player_headers = {'Authorization': f'Bearer {create_access_token(player_id)}'}
+    created = client.post('/api/v1/admin/missions', headers=admin_headers, json=body)
+    assert created.status_code == 201, created.text
+    mission_id = created.json()['id']
+    body['branching']['scenarios'][0]['nodes'][tool['scenarios'][0]['start_node_id']]['text'] = 'Новая ситуация и вопрос для игрока.'
+    updated = client.put(f'/api/v1/admin/missions/{mission_id}', headers=admin_headers, json=body)
+    assert updated.status_code == 200, updated.text
+    saved = client.get(f'/api/v1/admin/missions/{mission_id}', headers=admin_headers).json()
+    assert saved['config']['branching']['source'] == 'admin'
+    assert saved['config']['branching']['scenarios'][0]['nodes'][tool['scenarios'][0]['start_node_id']]['text'] == 'Новая ситуация и вопрос для игрока.'
+    invalid = json.loads(json.dumps(body))
+    invalid['branching']['scenarios'][0]['nodes'][tool['scenarios'][0]['start_node_id']]['options'][0]['next_node'] = 'missing-node'
+    assert client.put(f'/api/v1/admin/missions/{mission_id}', headers=admin_headers,
+                      json=invalid).status_code == 422
+    assert client.put(f'/api/v1/admin/missions/{mission_id}/status', headers=admin_headers,
+                      json={'status': 'published'}).status_code == 200
+    session = client.post('/api/v1/sessions', headers=player_headers, json={
+        'mode': 'method_training', 'mission_id': mission_id,
+    })
+    assert session.status_code == 201, session.text
+    session_id = session.json()['id']
+    for _ in range(10):
+        view = client.get(f'/api/v1/sessions/{session_id}/branching', headers=player_headers).json()
+        if view['status'] != 'active':
+            break
+        answer = view['choices'][0]
+        response = client.post(f'/api/v1/sessions/{session_id}/branching/choice',
+                               headers=player_headers,
+                               json={'node_id': view['node']['node_id'], 'option_id': answer['id']})
+        assert response.status_code == 200, response.text
+    assert view['status'] != 'active'
+
+
+def test_logout_revokes_only_the_presented_token(database, monkeypatch):
+    monkeypatch.setattr(auth_dependencies, 'engine', database)
+    monkeypatch.setattr(auth_router, 'engine', database)
+    monkeypatch.setattr(sessions_websocket, 'engine', database)
+    with database.begin() as connection:
+        user_id = connection.execute(text(
+            "INSERT INTO users(display_name) VALUES ('Player') RETURNING id"
+        )).scalar_one()
+    first_token = create_access_token(user_id)
+    other_token = create_access_token(user_id)
+    client = TestClient(app)
+    first = {'Authorization': f'Bearer {first_token}'}
+    other = {'Authorization': f'Bearer {other_token}'}
+    assert first_token != other_token
+    assert client.get('/api/v1/users/me', headers=first).status_code == 200
+    assert client.post('/api/v1/auth/logout', headers=first).status_code == 200
+    assert client.get('/api/v1/users/me', headers=first).status_code == 401
+    assert client.get('/api/v1/users/me', headers=other).status_code == 200
+    assert asyncio.run(sessions_websocket.get_user_id_from_websocket(
+        SimpleNamespace(query_params={'token': first_token})
+    )) is None
+
+
+def test_admin_guided_training_can_be_created_and_played(database, monkeypatch):
+    for module in (auth_dependencies, admin_router, sessions_router, guided_router):
+        monkeypatch.setattr(module, 'engine', database)
+    with database.begin() as connection:
+        admin_id = connection.execute(text(
+            "INSERT INTO users(display_name, role) VALUES ('Admin', 'admin') RETURNING id"
+        )).scalar_one()
+        player_id = connection.execute(text(
+            "INSERT INTO users(display_name) VALUES ('Player') RETURNING id"
+        )).scalar_one()
+        paei_id = connection.execute(text('''
+            INSERT INTO paei_profiles(code, leading_letter, p_value, a_value, e_value, i_value)
+            VALUES ('GUIDED', 'P', 50, 50, 50, 50) RETURNING id
+        ''')).scalar_one()
+        difficulty_id = connection.execute(text('''
+            INSERT INTO difficulty_profiles(code, title, settings)
+            VALUES ('GUIDED', 'Guided', '{}') RETURNING id
+        ''')).scalar_one()
+    client = TestClient(app)
+    admin_headers = {'Authorization': f'Bearer {create_access_token(admin_id)}'}
+    player_headers = {'Authorization': f'Bearer {create_access_token(player_id)}'}
+    character = client.post('/api/v1/admin/characters', headers=admin_headers, json={
+        'slug': 'guided-mentor', 'name': 'Наставница',
+    })
+    knowledge = client.post('/api/v1/admin/knowledge', headers=admin_headers, json={
+        'slug': 'guided-topic', 'title': 'Планирование', 'body': 'Материал',
+    })
+    assert character.status_code == 201 and knowledge.status_code == 201
+    topic_id = knowledge.json()['id']
+    assert client.put(f'/api/v1/admin/knowledge/{topic_id}/status', headers=admin_headers,
+                      json={'status': 'published'}).status_code == 200
+    mission = client.post('/api/v1/admin/missions', headers=admin_headers, json={
+        'mission_type': 'method_training', 'interaction_type': 'guided_training',
+        'knowledge_item_id': topic_id, 'character_id': character.json()['id'],
+        'title': 'Планирование работы', 'situation': 'У команды две срочные задачи.',
+        'task': 'Выберите порядок работы', 'opening_message': 'Что сделаем первым?',
+        'guided': {'steps': [{
+            'speaker': 'Наставница', 'text': 'До встречи десять минут. Что сделаете сначала?',
+            'goal': 'Выбрать главное действие', 'hint': 'Сначала проверьте основные данные.',
+            'options': [
+                {'text': 'Украшу титул', 'feedback': 'Это не решает задачу.', 'assessment': 'incorrect'},
+                {'text': 'Проверю данные', 'feedback': 'Верно, данные важнее.', 'assessment': 'correct'},
+                {'text': 'Сделаю всё сразу', 'feedback': 'Выберите приоритет.', 'assessment': 'partial'},
+            ],
+        }], 'final_situation': 'Новая встреча через час. Как выстроите подготовку?',
+            'final_goal': 'Объяснить порядок действий', 'criteria': ['Называет приоритет'],
+            'example_answer': 'Сперва проверю данные, затем подготовлю презентацию.'},
+    })
+    assert mission.status_code == 201, mission.text
+    mission_id = mission.json()['id']
+    assert client.put(f'/api/v1/admin/missions/{mission_id}/status', headers=admin_headers,
+                      json={'status': 'published'}).status_code == 200
+    session = client.post('/api/v1/sessions', headers=player_headers, json={
+        'mode': 'method_training', 'mission_id': mission_id,
+        'paei_profile_id': str(paei_id), 'difficulty_profile_id': str(difficulty_id),
+    })
+    assert session.status_code == 201, session.text
+    session_id = session.json()['id']
+    base = f'/api/v1/sessions/{session_id}/guided'
+    start = client.get(base, headers=player_headers)
+    assert start.status_code == 200, start.text
+    assert start.json()['node']['id'] == 'STEP_1'
+    retry = client.post(base + '/choice', headers=player_headers,
+                        json={'node_id': 'STEP_1', 'choice_id': 'a'})
+    assert retry.status_code == 200 and retry.json()['node']['id'] == 'STEP_1_RETRY'
+    final = client.post(base + '/choice', headers=player_headers,
+                        json={'node_id': 'STEP_1_RETRY', 'choice_id': 'b'})
+    assert final.status_code == 200 and final.json()['node']['id'] == 'TRANSFER'
+    answer = client.post(base + '/answer', headers=player_headers,
+                         json={'node_id': 'TRANSFER', 'text': 'Проверю данные.'})
+    assert answer.status_code == 200 and answer.json()['status'] == 'completed'
+
+
 @pytest.mark.parametrize('database', ['0001'], indirect=True)
 def test_upgrade_from_catalog_branch_preserves_password_hash(database):
     with database.begin() as connection:
@@ -667,3 +828,65 @@ def test_password_migration_preserves_existing_users(database):
             WHERE table_schema = current_schema() AND table_name = 'users'
               AND column_name = 'password_hash'
         ''')).scalar_one() == 0
+
+
+def test_bundled_branching_catalog_and_complete_scenario(database, monkeypatch):
+    from app.admin import import_editorial
+
+    monkeypatch.setattr(import_editorial, 'engine', database)
+    for module in (auth_dependencies, sessions_router, branching_router):
+        monkeypatch.setattr(module, 'engine', database)
+    knowledge, guided, branching = import_editorial.load_data()
+    import_editorial.apply(knowledge, guided, branching)
+    with database.begin() as connection:
+        user_id = connection.execute(text(
+            "INSERT INTO users(display_name) VALUES ('Training player') RETURNING id"
+        )).scalar_one()
+        mission = connection.execute(text('''
+            SELECT id FROM missions WHERE interaction_type='branching_training'
+              AND branch_key='methods' AND order_index=1
+        ''')).scalar_one()
+        assert connection.execute(text('''
+            SELECT count(*) FROM missions WHERE interaction_type='branching_training'
+        ''')).scalar_one() == 17
+    headers = {'Authorization': f'Bearer {create_access_token(user_id)}'}
+    client = TestClient(app)
+    first = client.post('/api/v1/sessions', json={'mode': 'method_training', 'mission_id': str(mission)}, headers=headers)
+    assert first.status_code == 201, first.text
+    first_id = first.json()['id']
+    second = client.post('/api/v1/sessions', json={'mode': 'method_training', 'mission_id': str(mission)}, headers=headers)
+    assert second.status_code == 201, second.text
+    base = f'/api/v1/sessions/{first_id}/branching'
+    view = client.get(base, headers=headers).json()
+    other = client.get(f"/api/v1/sessions/{second.json()['id']}/branching", headers=headers).json()
+    assert view['scenario_id'] != other['scenario_id']
+    assert view['tool_title'] == 'Гарвардский метод'
+    assert len(view['choices']) >= 2
+
+    tool = branching['tools'][0]
+    scenario = next(item for item in tool['scenarios'] if item['id'] == view['scenario_id'])
+    queue = [(scenario['start_node_id'], [])]
+    path = None
+    while queue:
+        node_id, choices = queue.pop(0)
+        node = scenario['nodes'][node_id]
+        if node['type'] == 'terminal':
+            if node['outcome'] == 'success':
+                path = choices
+                break
+            continue
+        queue.extend((option['next_node'], [*choices, (node_id, option['id'])]) for option in node['options'])
+    assert path
+    for node_id, option_id in path:
+        response = client.post(f'{base}/choice', json={'node_id': node_id, 'option_id': option_id}, headers=headers)
+        assert response.status_code == 200, response.text
+        view = response.json()
+        assert 'flag' not in view['events'][-1]
+        if view['status'] == 'active':
+            assert 'feedback' not in view['events'][-1]
+    assert view['status'] == 'completed'
+    assert view['final_result']['result'] == 'success'
+    assert all(event['feedback'] for event in view['events'])
+    repeated = client.post(f'{base}/choice', json={'node_id': path[-1][0], 'option_id': path[-1][1]}, headers=headers)
+    assert repeated.status_code == 200
+    assert len(repeated.json()['events']) == len(path)

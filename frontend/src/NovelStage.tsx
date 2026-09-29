@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type NovelLine = { key: string; role: 'user' | 'assistant'; content: string; emotion?: string; speaker?: string };
 
@@ -12,12 +12,22 @@ export function NovelStage({ lines, name, playerName, character = 'anna', waitin
 }) {
   const [page, setPage] = useState(() => Math.max(0, lines.length - 1));
   const [shown, setShown] = useState(0);
+  const previousKeys = useRef(lines.map(line => line.key));
   const current = lines[Math.min(page, lines.length - 1)];
   const content = current?.content || '';
   const complete = shown >= content.length;
   const emotion = current?.role === 'assistant' && current.emotion && current.emotion in frames ? current.emotion : 'neutral';
 
-  useEffect(() => { setPage(value => Math.min(value, Math.max(0, lines.length - 1))); }, [lines.length]);
+  useEffect(() => {
+    const keys = lines.map(line => line.key);
+    const oldKeys = previousKeys.current;
+    // A new speaker starts at the first newly added line. Existing lines stay on
+    // the page selected by the player, including while their text streams in.
+    const firstNew = keys.findIndex(key => !oldKeys.includes(key));
+    if (firstNew >= 0 && oldKeys.length > 0) setPage(firstNew);
+    else setPage(value => Math.min(value, Math.max(0, lines.length - 1)));
+    previousKeys.current = keys;
+  }, [lines]);
 
   useEffect(() => { setShown(0); }, [current?.key]);
   useEffect(() => {

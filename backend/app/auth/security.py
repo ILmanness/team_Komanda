@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
+import hashlib
 
 import jwt
 from pwdlib import PasswordHash
@@ -28,6 +29,7 @@ def create_access_token(user_id: UUID) -> str:
         "iat": now,
         "exp": expires_at,
         "type": "access",
+        "jti": str(uuid4()),
     }
 
     return jwt.encode(
@@ -55,3 +57,15 @@ def decode_access_token(token: str) -> UUID:
         raise ValueError("Token does not contain user id")
 
     return UUID(user_id)
+
+
+def access_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+
+def access_token_expires_at(token: str) -> datetime:
+    settings = get_settings()
+    payload = jwt.decode(token, settings.auth_secret_key, algorithms=[settings.hesh_alg])
+    if payload.get('type') != 'access':
+        raise ValueError('Invalid token type')
+    return datetime.fromtimestamp(payload['exp'], UTC)

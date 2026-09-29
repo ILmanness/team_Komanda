@@ -6,19 +6,26 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import InvalidTokenError
 from sqlalchemy import text
 
-from app.auth.security import decode_access_token
+from app.auth.security import access_token_hash, decode_access_token
 from app.db import engine
 
 bearer_scheme = HTTPBearer()
 
 
-def get_current_user_id(
+async def get_current_user_id(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
 ) -> UUID:
     token = credentials.credentials
 
     try:
-        return decode_access_token(token)
+        user_id = decode_access_token(token)
+        async with engine.connect() as connection:
+            revoked = (await connection.execute(text(
+                'SELECT 1 FROM revoked_access_tokens WHERE token_hash=:token_hash'
+            ), {'token_hash': access_token_hash(token)})).scalar()
+        if revoked:
+            raise ValueError('Revoked token')
+        return user_id
     except (InvalidTokenError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

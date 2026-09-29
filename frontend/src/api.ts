@@ -148,6 +148,19 @@ export type GuidedTraining = {
   material_id: string;
 };
 
+export type BranchingEvent = {
+  sequence_no: number; node_id: string; option_id: string; choice_text: string;
+  effect: string | null; feedback?: string;
+};
+export type BranchingTraining = {
+  session_id: string; mission_id: string; status: GameSession['status']; tool_id: string; tool_title: string;
+  tool_description: string; category: 'methods' | 'principles';
+  scenario_id: string; scenario_title: string; goal: string;
+  node: { node_id: string; type: 'decision' | 'consequence' | 'terminal'; speaker: string; text: string; outcome: string | null };
+  choices: { id: string; text: string }[]; events: BranchingEvent[];
+  final_result: { result?: string; scenario_id?: string; tool_id?: string } | null;
+};
+
 export type AdminStoryline = Storyline & { status: string };
 export type AdminCharacter = CharacterOption & { slug: string; base_prompt: string };
 export type AdminKnowledge = { id: string; slug: string; item_type: 'topic' | 'article' | 'method'; title: string; summary: string; body: string; parent_id: string | null; status: string };
@@ -161,16 +174,23 @@ export type AdminOverview = {
   difficulty_profiles: GameOptions['difficulty_profiles'];
 };
 export type AdminChoice = { id: string; text: string; feedback: string; quality: number; contact: number; tension: number; progress: number; critical_error: boolean };
+export type AdminGuidedOption = { text: string; effect: string; feedback: string; assessment: 'correct' | 'partial' | 'incorrect' };
+export type AdminGuidedStep = { speaker: string; text: string; goal: string; hint: string; options: AdminGuidedOption[] };
+export type AdminGuidedAuthoring = { steps: AdminGuidedStep[]; final_situation: string; final_goal: string; criteria: string[]; example_answer: string };
+export type AdminBranchingOption = { id: string; text: string; effect: string | null; flag: string | null; feedback: string; next_node: string };
+export type AdminBranchingNode = { node_id: string; type: 'decision' | 'consequence' | 'terminal'; speaker: string; text: string; outcome: 'success' | 'partial' | 'fail' | 'not_applied' | null; options: AdminBranchingOption[] };
+export type AdminBranchingScenario = { id: string; title: string; goal: string; start_node_id: string; weight: number; status: 'active' | 'inactive'; nodes: Record<string, AdminBranchingNode> };
+export type AdminBranchingTool = { id: string; category: 'methods' | 'principles'; title: string; description: string; order: number; scenarios: AdminBranchingScenario[]; source?: string };
 export type AdminMission = AdminMissionSummary & {
   task: string;
   context: { situation?: string; public_context?: string; opening_message?: string };
-  config: { max_turns?: number; training?: { choices: AdminChoice[]; hints: string[] } };
+  config: { max_turns?: number; training?: { choices: AdminChoice[]; hints: string[] }; guided?: { source?: string; authoring?: AdminGuidedAuthoring }; branching?: AdminBranchingTool };
 };
 export type AdminMissionWrite = {
-  mission_type: Mission['mission_type']; interaction_type: 'ai_dialogue' | 'single_choice';
+  mission_type: Mission['mission_type']; interaction_type: 'ai_dialogue' | 'single_choice' | 'guided_training' | 'branching_training';
   storyline_id: string | null; knowledge_item_id: string | null; character_id: string;
   branch_key: string | null; order_index: number | null; title: string; situation: string; public_context: string;
-  task: string; opening_message: string; max_turns: number; choices: AdminChoice[]; hints: string[];
+  task: string; opening_message: string; max_turns: number; choices: AdminChoice[]; hints: string[]; guided: AdminGuidedAuthoring | null; branching?: AdminBranchingTool | null;
 };
 
 export type CreateSessionRequest = {
@@ -251,6 +271,12 @@ export const api = {
   guidedAnswer: (token: string, id: string, node_id: string, text: string) => request<GuidedTraining>(`/v1/sessions/${encodeURIComponent(id)}/guided/answer`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ node_id, text }),
   }),
+  branching: (token: string, id: string, signal?: AbortSignal) => request<BranchingTraining>(`/v1/sessions/${encodeURIComponent(id)}/branching`, {
+    signal, headers: { Authorization: `Bearer ${token}` },
+  }),
+  branchingChoice: (token: string, id: string, node_id: string, option_id: string) => request<BranchingTraining>(`/v1/sessions/${encodeURIComponent(id)}/branching/choice`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ node_id, option_id }),
+  }),
   me: (token: string) => request<User>('/v1/users/me', { headers: { Authorization: `Bearer ${token}` } }),
   accountStats: (token: string, signal?: AbortSignal) => request<AccountStats>('/v1/users/me/stats', {
     signal, headers: { Authorization: `Bearer ${token}` },
@@ -264,7 +290,7 @@ export const api = {
   register: (email: string, password: string, display_name: string, login: string) => request<AuthResponse>('/v1/auth/register', {
     method: 'POST', body: JSON.stringify({ email, password, display_name, login }),
   }),
-  logout: () => request<{ message: string }>('/v1/auth/logout', { method: 'POST' }),
+  logout: (token: string) => request<{ message: string }>('/v1/auth/logout', { method: 'POST', keepalive: true, headers: { Authorization: `Bearer ${token}` } }),
   adminOverview: (token: string) => request<AdminOverview>('/v1/admin/overview', { headers: { Authorization: `Bearer ${token}` } }),
   adminMission: (token: string, id: string) => request<AdminMission>(`/v1/admin/missions/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${token}` } }),
   adminSave: (token: string, kind: 'storylines' | 'missions' | 'characters' | 'knowledge', body: unknown, id?: string) => request<{ id: string; status?: string }>(`/v1/admin/${kind}${id ? `/${encodeURIComponent(id)}` : ''}`, {

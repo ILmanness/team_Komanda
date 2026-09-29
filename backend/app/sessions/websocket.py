@@ -22,7 +22,7 @@ router = APIRouter(
 )
 
 
-def get_user_id_from_websocket(
+async def get_user_id_from_websocket(
     websocket: WebSocket,
 ) -> UUID | None:
 
@@ -38,7 +38,13 @@ def get_user_id_from_websocket(
             decode_access_token,
         )
 
-        return decode_access_token(token)
+        from app.auth.security import access_token_hash
+        user_id = decode_access_token(token)
+        async with engine.connect() as connection:
+            revoked = (await connection.execute(text(
+                'SELECT 1 FROM revoked_access_tokens WHERE token_hash=:token_hash'
+            ), {'token_hash': access_token_hash(token)})).scalar()
+        return None if revoked else user_id
 
     except (jwt.PyJWTError, ValueError):
         return None
@@ -89,7 +95,7 @@ async def session_websocket(
     session_id: UUID,
 ):
 
-    user_id = get_user_id_from_websocket(websocket)
+    user_id = await get_user_id_from_websocket(websocket)
     if user_id is None:
         await websocket.close(code=1008)
         return
@@ -139,6 +145,10 @@ async def session_websocket(
             raw_message = (
                 await websocket.receive_json()
             )
+
+            if await get_user_id_from_websocket(websocket) is None:
+                await websocket.close(code=1008)
+                return
 
             try:
 

@@ -37,15 +37,16 @@ export function MissionSetup({ mode }: { mode: 'story' | 'method_training' }) {
     setError('');
     try {
       const guided = briefing?.interaction_type === 'guided_training';
+      const branching = briefing?.interaction_type === 'branching_training';
       const created = await api.createSession(token, { mode, mission_id: id });
-      navigate(guided ? `/training/guided/${created.id}` : `/session/${created.id}`);
+      navigate(branching ? `/training/branching/${created.id}` : guided ? `/training/guided/${created.id}` : `/session/${created.id}`);
     } catch (cause) { setError(errorText(cause)); }
     finally { setPending(false); }
   }
 
   const back = mode === 'story' ? '/story' : '/training';
   if (!briefing) return <section className="section-wrap content-section custom-loading"><Link className="back-link" to={back}>← Назад</Link><div className="notice" role="status">{error || 'Загружаем сценарий…'}</div></section>;
-  const guided = briefing.interaction_type === 'guided_training';
+  const guided = briefing.interaction_type === 'guided_training' || briefing.interaction_type === 'branching_training';
   const ready = briefing.character !== null && (mode === 'story' || guided || briefing.interaction_type === 'single_choice');
   return <div className="section-wrap custom-page mission-setup">
     <Link className="back-link" to={back}>← Назад</Link>
